@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name_release">小企鹅输入法.fx</string>
-    <string name="app_name_debug">小企鹅输入法.fx (调试)</string>
+    <string name="app_name_release">小企鹅输入法.ez</string>
+    <string name="app_name_debug">小企鹅输入法.ez (调试)</string>
     <string name="app_name_mainline_release">小企鹅输入法</string>
     <string name="app_name_mainline_debug">小企鹅输入法 (调试)</string>
     <string name="save">保存</string>
@@ -651,6 +651,8 @@
     <string name="theme_import_overwrite_title">主题已存在</string>
     <string name="theme_import_overwrite_message">主题"%1$s"已存在，是否覆盖？</string>
     <string name="theme_imported_from_qr">主题已导入并保存。</string>
+    <string name="enable_cantonese_pinyin_dictionary">拼音输入粤语词</string>
+    <string name="enable_cantonese_pinyin_dictionary_summary">为标准拼音输入法启用粤语兼容词库</string>
     <string name="preferred_voice_input">首选语音输入</string>
     <string name="background_blur_radius">背景模糊半径</string>
     <string name="no_blur">无模糊</string>

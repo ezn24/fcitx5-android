@@ -40,6 +40,7 @@ object EmojiModifier {
         0x1F590, // 🖐️
     )
     private const val VariationSelector16 = 0xFE0F
+    private val SkinToneModifiers = 0x1F3FB..0x1F3FF
 
     /**
      * **Special Case 2:** Make `U+1F91D`(🤝 Handshake) in 🧑‍🤝‍🧑 not modifiable
@@ -93,17 +94,30 @@ object EmojiModifier {
 
     private val DefaultTextPaint = TextPaint()
 
+    fun removeSkinToneModifiers(emoji: String): String {
+        return buildString {
+            emoji.codePoints().forEach { codePoint ->
+                if (codePoint !in SkinToneModifiers) {
+                    appendCodePoint(codePoint)
+                }
+            }
+        }
+    }
+
     fun getPreferredTone(emoji: String): String {
         if (!isSupported()) return emoji
-        val (codePoints, modifiable) = getCodePoints(emoji)
-        if (!isModifiable(modifiable)) return emoji
+        val baseEmoji = removeSkinToneModifiers(emoji)
+        val (codePoints, modifiable) = getCodePoints(baseEmoji)
+        if (!isModifiable(modifiable)) return baseEmoji
         val candidate = buildEmoji(codePoints, modifiable, defaultSkinTone)
-        return if (DefaultTextPaint.hasGlyph(candidate)) candidate else emoji
+        return if (DefaultTextPaint.hasGlyph(candidate)) candidate else baseEmoji
     }
+
+    fun defaultSkinToneVersion(): String = defaultSkinTone.name
 
     fun produceSkinTones(emoji: String): Array<String>? {
         if (!isSupported()) return null
-        val (codePoints, modifiable) = getCodePoints(emoji)
+        val (codePoints, modifiable) = getCodePoints(removeSkinToneModifiers(emoji))
         if (!isModifiable(modifiable)) return null
         val candidates = SkinTone.entries
             .filter { it != defaultSkinTone }

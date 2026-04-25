@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name_release">Fcitx5.fx</string>
-    <string name="app_name_debug">Fcitx5.fx (Debug)</string>
+    <string name="app_name_release">Fcitx5.ez</string>
+    <string name="app_name_debug">Fcitx5.ez (Debug)</string>
     <string name="app_name_mainline_release">Fcitx5</string>
     <string name="app_name_mainline_debug">Fcitx5 (Debug)</string>
     <string name="save">Save</string>
@@ -668,6 +668,8 @@
     <string name="theme_import_overwrite_title">Theme already exists</string>
     <string name="theme_import_overwrite_message">Theme "%1$s" already exists. Overwrite it?</string>
     <string name="theme_imported_from_qr">Theme imported. Save completed.</string>
+    <string name="enable_cantonese_pinyin_dictionary">Cantonese words in Pinyin</string>
+    <string name="enable_cantonese_pinyin_dictionary_summary">Enable a Cantonese compatibility dictionary for the standard Pinyin input method</string>
     <string name="preferred_voice_input">Preferred voice input</string>
     <string name="background_blur_radius">Background Blur Radius</string>
     <string name="no_blur">No Blur</string>

@@ -11,7 +11,7 @@ plugins {
 
 val packageBase = "org.fcitx.fcitx5.android"
 val appIdBase = packageBase
-val appIdFxSuffix = ".fx"
+val appIdFlavorSuffix = ".ez"
 val flavorFx = "fx"
 val flavorMainline = "mainline"
 val appLabelDefault = "@string/app_name"
@@ -61,7 +61,7 @@ android {
     productFlavors {
         create(flavorFx) {
             dimension = "brand"
-            applicationIdSuffix = appIdFxSuffix
+            applicationIdSuffix = appIdFlavorSuffix
             buildConfigField("boolean", "IS_FX_BUILD", "true")
         }
         create(flavorMainline) {
@@ -184,7 +184,7 @@ androidComponents {
                     if (output is com.android.build.api.variant.impl.VariantOutputImpl) {
                         output.outputFileName.set(
                             output.outputFileName.get()
-                                .replace("org.fcitx.fcitx5.android-", "org.fcitx.fcitx5.android.fx-")
+                                .replace("org.fcitx.fcitx5.android-", "org.fcitx.fcitx5.android.ez-")
                                 .replace("-fx-", "-")
                         )
                     }
