@@ -6,7 +6,7 @@
 
 
 ## 修改内容：
-- 拉起最新 Unicode emoji
+- 拉取最新 Unicode emoji
 - 改进粤语拼音
 - 改进中文 emoji 的触发
 
