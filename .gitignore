@@ -6,7 +6,6 @@
 !/app/src/main/assets/usr/share/fcitx5/
 !/app/src/main/assets/usr/share/fcitx5/pinyin/
 !/app/src/main/assets/usr/share/fcitx5/pinyin/dictionaries/
-!/app/src/main/assets/usr/share/fcitx5/pinyin/dictionaries/fcitx5-android-cantonese-compat.txt
 !/app/src/main/assets/usr/share/fcitx5/pinyin/dictionaries/fcitx5-android-emoji.txt
 # Generated asset descriptor
 /app/src/main/assets/descriptor.json

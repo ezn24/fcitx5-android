@@ -182,6 +182,24 @@ sealed class SettingsRoute : Parcelable {
     data object PinyinCustomPhrase : SettingsRoute()
 
     @Serializable
+    data object PinyinEmojiDict : SettingsRoute()
+
+    @Serializable
+    data object EnglishWordList : SettingsRoute()
+
+    @Serializable
+    data object EnglishDictionaries : SettingsRoute()
+
+    @Serializable
+    data object EnglishPhraseBooks : SettingsRoute()
+
+    @Serializable
+    data object EnglishCustomPredictions : SettingsRoute()
+
+    @Serializable
+    data object EnglishCustomPhrase : SettingsRoute()
+
+    @Serializable
     data class MultiSelect(
         val title: String,
         val addon: String,
@@ -265,6 +283,24 @@ sealed class SettingsRoute : Parcelable {
                 label = ctx.getString(R.string.table_im)
             }
             fragment<PinyinCustomPhraseFragment, PinyinCustomPhrase>()
+            fragment<PinyinEmojiDictionaryFragment, PinyinEmojiDict> {
+                label = ctx.getString(R.string.pinyin_emoji_dict)
+            }
+            fragment<EnglishWordListFragment, EnglishWordList> {
+                label = ctx.getString(R.string.english_word_list)
+            }
+            fragment<EnglishDictionaryFragment, EnglishDictionaries> {
+                label = ctx.getString(R.string.english_manage_dictionaries)
+            }
+            fragment<EnglishPhraseBookFragment, EnglishPhraseBooks> {
+                label = ctx.getString(R.string.english_manage_phrase_books)
+            }
+            fragment<EnglishCustomPhrasePredictionFragment, EnglishCustomPredictions> {
+                label = ctx.getString(R.string.english_manage_custom_predictions)
+            }
+            fragment<EnglishCustomPhraseFragment, EnglishCustomPhrase> {
+                label = ctx.getString(R.string.english_manage_custom_phrase)
+            }
             fragment<GenericMultiSelectFragment, MultiSelect>()
         }
     }

@@ -33,8 +33,6 @@ class AppPrefs(private val sharedPreferences: SharedPreferences) {
         val firstRun = bool("first_run", true)
         val lastSymbolLayout = string("last_symbol_layout", PickerWindow.Key.Symbol.name)
         val lastPickerType = string("last_picker_type", PickerWindow.Key.Emoji.name)
-        val enableCantonesePinyinDictionary =
-            bool("enable_cantonese_pinyin_dictionary", false)
         val verboseLog = bool("verbose_log", false)
         val pid = int("pid", 0)
         val editorInfoInspector = bool("editor_info_inspector", false)

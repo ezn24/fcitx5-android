@@ -29,6 +29,12 @@ msgstr ""
 msgid "Disable word hint based on editor attributes"
 msgstr ""
 
+msgid "Enable custom English word list"
+msgstr ""
+
+msgid "Phrase prediction candidates per prefix"
+msgstr ""
+
 msgid "Word hint page size"
 msgstr ""
 

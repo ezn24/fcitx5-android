@@ -419,9 +419,7 @@ class Fcitx(private val context: Context) : FcitxAPI, FcitxLifecycleOwner {
     private val dispatcher = FcitxDispatcher(object : FcitxDispatcher.FcitxController {
         override fun nativeStartup() {
             DataManager.sync()
-            PinyinDictManager.syncManagedDictionaries(
-                AppPrefs.getInstance().internal.enableCantonesePinyinDictionary.getValue()
-            )
+            PinyinDictManager.syncManagedDictionaries()
             val locale = Locales.fcitxLocale
             val dataDir = DataManager.dataDir.absolutePath
             val plugins = DataManager.getLoadedPlugins()

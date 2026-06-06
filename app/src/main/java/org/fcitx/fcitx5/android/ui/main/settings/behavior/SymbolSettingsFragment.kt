@@ -6,15 +6,20 @@
 package org.fcitx.fcitx5.android.ui.main.settings.behavior
 
 import androidx.lifecycle.lifecycleScope
+import androidx.preference.PreferenceScreen
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.launch
+import org.fcitx.fcitx5.android.R
 import org.fcitx.fcitx5.android.core.reloadPinyinDict
 import org.fcitx.fcitx5.android.daemon.FcitxDaemon
 import org.fcitx.fcitx5.android.data.pinyin.PinyinDictManager
 import org.fcitx.fcitx5.android.data.prefs.AppPrefs
 import org.fcitx.fcitx5.android.data.prefs.ManagedPreferenceFragment
 import org.fcitx.fcitx5.android.data.prefs.ManagedPreferenceProvider
+import org.fcitx.fcitx5.android.ui.main.settings.SettingsRoute
+import org.fcitx.fcitx5.android.utils.addPreference
+import org.fcitx.fcitx5.android.utils.navigateWithAnim
 
 class SymbolSettingsFragment : ManagedPreferenceFragment(AppPrefs.getInstance().symbols) {
 
@@ -28,6 +33,15 @@ class SymbolSettingsFragment : ManagedPreferenceFragment(AppPrefs.getInstance().
         }
     }
 
+    override fun onPreferenceUiCreated(screen: PreferenceScreen) {
+        screen.addPreference(
+            R.string.pinyin_emoji_dict,
+            R.string.pinyin_emoji_dict_summary
+        ) {
+            navigateWithAnim(SettingsRoute.PinyinEmojiDict)
+        }
+    }
+
     override fun onStart() {
         super.onStart()
         symbols.registerOnChangeListener(managedDictionaryListener)
@@ -37,9 +51,7 @@ class SymbolSettingsFragment : ManagedPreferenceFragment(AppPrefs.getInstance().
         if (managedDictionaryDirty) {
             managedDictionaryDirty = false
             lifecycleScope.launch(NonCancellable + Dispatchers.IO) {
-                val result = PinyinDictManager.syncManagedData(
-                    AppPrefs.getInstance().internal.enableCantonesePinyinDictionary.getValue()
-                )
+                val result = PinyinDictManager.syncManagedData()
                 if (result.anyChanged) {
                     if (result.symbolsChanged) {
                         FcitxDaemon.restartFcitx()

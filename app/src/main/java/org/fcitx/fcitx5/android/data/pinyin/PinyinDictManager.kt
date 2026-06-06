@@ -39,15 +39,15 @@ object PinyinDictManager {
         DataManager.dataDir, "usr/share/fcitx5/pinyin/symbols"
     )
 
+    private const val emojiDictionarySourceName = "fcitx5-android-emoji.txt"
+    private const val emojiDictionaryName = "fcitx5-android-emoji"
+
+    private val customEmojiDictionarySource = File(pinyinDicDir, emojiDictionarySourceName)
+
     private val managedDictionarySpecs = listOf(
         ManagedDictionarySpec(
-            sourceName = "fcitx5-android-cantonese-compat.txt",
-            dictionaryName = "fcitx5-android-cantonese-compat",
-            markerName = "fcitx5-android-cantonese-compat.version"
-        ),
-        ManagedDictionarySpec(
-            sourceName = "fcitx5-android-emoji.txt",
-            dictionaryName = "fcitx5-android-emoji",
+            sourceName = emojiDictionarySourceName,
+            dictionaryName = emojiDictionaryName,
             markerName = "fcitx5-android-emoji.version",
             transformLine = ::applyPreferredEmojiTone
         )
@@ -98,9 +98,8 @@ object PinyinDictManager {
         return new
     }
 
-    fun syncManagedData(enableCantonese: Boolean): SyncResult {
+    fun syncManagedData(): SyncResult {
         val enabled = mapOf(
-            "fcitx5-android-cantonese-compat" to enableCantonese,
             "fcitx5-android-emoji" to true
         )
         val dictionaryChanged = managedDictionarySpecs.map { spec ->
@@ -112,9 +111,31 @@ object PinyinDictManager {
         )
     }
 
-    fun syncManagedDictionaries(enableCantonese: Boolean): Boolean {
-        return syncManagedData(enableCantonese).anyChanged
+    fun syncManagedDictionaries(): Boolean {
+        return syncManagedData().anyChanged
     }
+
+    fun loadEmojiDictionaryData(): PinyinEmojiDictionaryData {
+        val source = customEmojiDictionarySource.takeIf { it.exists() }
+            ?: File(bundledPinyinDictDir, emojiDictionarySourceName)
+        return PinyinEmojiDictionaryData.fromLines(source.readLines())
+    }
+
+    fun saveEmojiDictionaryData(data: PinyinEmojiDictionaryData) {
+        customEmojiDictionarySource.parentFile?.mkdirs()
+        customEmojiDictionarySource.writeText(data.serialize())
+        File(pinyinDicDir, "fcitx5-android-emoji.version").delete()
+    }
+
+    fun resetEmojiDictionaryData(): Boolean {
+        val deleted = customEmojiDictionarySource.delete()
+        if (deleted) {
+            File(pinyinDicDir, "fcitx5-android-emoji.version").delete()
+        }
+        return deleted
+    }
+
+    fun isEmojiDictionaryCustomized(): Boolean = customEmojiDictionarySource.exists()
 
     private fun syncManagedDictionary(spec: ManagedDictionarySpec, enabled: Boolean): Boolean {
         val active = File(pinyinDicDir, "${spec.dictionaryName}.${PinyinDictionary.Type.LibIME.ext}")
@@ -129,7 +150,11 @@ object PinyinDictManager {
             changed = true
         }
 
-        val source = File(bundledPinyinDictDir, spec.sourceName)
+        val source = if (spec.dictionaryName == emojiDictionaryName && customEmojiDictionarySource.exists()) {
+            customEmojiDictionarySource
+        } else {
+            File(bundledPinyinDictDir, spec.sourceName)
+        }
         if (!source.exists()) {
             Timber.w("Managed dictionary source does not exist: $source")
             return false

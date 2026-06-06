@@ -6,9 +6,9 @@
 
 
 ## 修改内容：
+- 为默认英语添加 自定词库 & 自定字词功能
 - 拉取最新 Unicode emoji
-- 改进粤语拼音
-- 改进中文 emoji 的触发
+- 改进拼音输入 emoji 的触发 & 添加自定拼音emoji字典的编辑
 
 默认通过 `./gradlew :app:assembleDebug` 等常规命令构建的是带 `.ez` 后缀的 ez 变体（包名 `org.fcitx.fcitx5.android.ez`、界面标题携带 `.ez`、APK 文件名体现 `.ez`、主要输出路径为 `app/build/outputs/apk/fx/<buildType>`，数据目录为 `/Android/data/org.fcitx.fcitx5.android.ez/...`）。同时为了兼容常见脚本，构建后会自动同步一份 APK 到 `app/build/outputs/apk/<buildType>`（不含 `ez/` 这一层）。想要生成与主仓命名一致的 mainline 变体时，可加上 `-PincludeMainlineFlavor=true` 并使用对应的 variant，例如：
 

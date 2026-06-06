@@ -30,8 +30,6 @@ abstract class FcitxPreferenceFragment : PaddingPreferenceFragment() {
     abstract suspend fun obtainConfig(fcitx: FcitxAPI): RawConfig
     abstract suspend fun saveConfig(fcitx: FcitxAPI, newConfig: RawConfig)
 
-    protected open fun onPreferenceScreenCreated(screen: PreferenceScreen) {}
-
     private lateinit var raw: RawConfig
     private var configLoaded = false
 
@@ -42,6 +40,8 @@ abstract class FcitxPreferenceFragment : PaddingPreferenceFragment() {
 
     private val fcitx: FcitxConnection
         get() = viewModel.fcitx
+
+    protected open fun onPreferenceUiCreated(screen: PreferenceScreen) {}
 
     private fun save() {
         if (!configLoaded) return
@@ -105,7 +105,7 @@ abstract class FcitxPreferenceFragment : PaddingPreferenceFragment() {
                     if (isEmpty()) {
                         addPreference(R.string.no_config_options)
                     }
-                    onPreferenceScreenCreated(this)
+                    onPreferenceUiCreated(this)
                 }
             } else {
                 preferenceManager.createPreferenceScreen(context).apply {

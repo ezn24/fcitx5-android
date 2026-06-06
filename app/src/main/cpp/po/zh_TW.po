@@ -36,6 +36,12 @@ msgstr "在使用物理鍵盤時啟用字詞提示"
 msgid "Disable word hint based on editor attributes"
 msgstr "依據編輯器屬性禁用字詞提示"
 
+msgid "Enable custom English word list"
+msgstr "啟用自訂英文詞表"
+
+msgid "Phrase prediction candidates per prefix"
+msgstr "每個前綴的聯想候選數"
+
 msgid "Word hint page size"
 msgstr "字詞提示頁大小"
 

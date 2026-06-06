@@ -12,6 +12,9 @@
 #include <fcitx/addonmanager.h>
 #include <fcitx/inputmethodengine.h>
 #include <fcitx/action.h>
+#include <filesystem>
+#include <unordered_map>
+#include <vector>
 
 namespace fcitx {
 
@@ -34,8 +37,12 @@ FCITX_CONFIGURATION(
             hintOnPhysicalKeyboard{this, "WordHintOnPhysicalKeyboard", _("Enable word hint when using physical keyboard"), false};
         Option<bool>
             editorControlledWordHint{this, "EditorControlledWordHint", _("Disable word hint based on editor attributes"), true};
+        Option<bool>
+            enableUserWordHint{this, "EnableUserWordHint", _("Enable custom English word list"), true};
         Option<int, IntConstrain>
             pageSize{this, "PageSize", _("Word hint page size"), 5, IntConstrain(3, 10)};
+        Option<int, IntConstrain>
+            phrasePredictionSize{this, "PhrasePredictionSize", _("Phrase prediction candidates per prefix"), 10, IntConstrain(1, 20)};
         OptionWithAnnotation<ChooseModifier, ChooseModifierI18NAnnotation>
             chooseModifier{this, "ChooseModifier", _("Choose key modifier"), ChooseModifier::Alt};
         Option<bool>
@@ -48,6 +55,7 @@ struct AndroidKeyboardEngineState : public InputContextProperty {
     InputBuffer buffer_;
     std::string origKeyString_;
     bool prependSpace_ = false;
+    std::vector<std::string> contextWords_;
 
     void reset() {
         buffer_.clear();
@@ -87,6 +95,8 @@ public:
 
     void resetState(InputContext *inputContext, bool fromCandidate = false);
 
+    void recordCommittedText(InputContext *inputContext, const std::string &text);
+
     FCITX_ADDON_DEPENDENCY_LOADER(spell, instance_->addonManager());
 //    FCITX_ADDON_DEPENDENCY_LOADER(emoji, instance_->addonManager());
 //    FCITX_ADDON_DEPENDENCY_LOADER(quickphrase, instance_->addonManager());
@@ -110,6 +120,10 @@ public:
 
 private:
     bool supportHint(const std::string &language);
+    void reloadUserWordsIfNeeded();
+    std::vector<std::pair<std::string, std::string>> userWordHints(const std::string &input);
+    std::vector<std::pair<std::string, std::string>> customPhraseHints(const std::string &input);
+    std::vector<std::pair<std::string, std::string>> phrasePredictionHints(InputContext *inputContext, const std::string &input);
     /**
      * preedit string and byte cursor
      */
@@ -119,6 +133,19 @@ private:
     AndroidKeyboardEngineConfig config_;
     KeyList selectionKeys_;
     fcitx::SimpleAction wordHintAction_;
+    std::vector<std::string> userWords_;
+    struct PhrasePrediction {
+        std::string next;
+        int score;
+    };
+    struct CustomPhrase {
+        std::string key;
+        int order;
+        std::string phrase;
+    };
+    std::vector<CustomPhrase> customPhrases_;
+    std::unordered_map<std::string, std::vector<PhrasePrediction>> phrasePredictions_;
+    std::filesystem::file_time_type userWordsLastModified_{};
 
     FactoryFor<AndroidKeyboardEngineState> factory_{
             [](InputContext &) { return new AndroidKeyboardEngineState; }

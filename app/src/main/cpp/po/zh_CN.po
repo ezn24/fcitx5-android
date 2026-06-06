@@ -36,6 +36,12 @@ msgstr "在使用物理键盘时启用单词提示"
 msgid "Disable word hint based on editor attributes"
 msgstr "根据编辑器属性禁用单词提示"
 
+msgid "Enable custom English word list"
+msgstr "启用自定义英文词表"
+
+msgid "Phrase prediction candidates per prefix"
+msgstr "每个前缀的联想候选数"
+
 msgid "Word hint page size"
 msgstr "单词提示页大小"
 

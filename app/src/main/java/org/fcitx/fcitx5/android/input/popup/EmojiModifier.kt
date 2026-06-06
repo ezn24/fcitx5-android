@@ -40,7 +40,41 @@ object EmojiModifier {
         0x1F590, // 🖐️
     )
     private const val VariationSelector16 = 0xFE0F
+    private const val ZeroWidthJoiner = 0x200D
+    private const val MaleSign = 0x2642
+    private const val FemaleSign = 0x2640
     private val SkinToneModifiers = 0x1F3FB..0x1F3FF
+
+    private val PersonGenderGroups = listOf(
+        intArrayOf(0x1F9D1, 0x1F468, 0x1F469),
+        intArrayOf(0x1F9D2, 0x1F466, 0x1F467),
+        intArrayOf(0x1F9D3, 0x1F474, 0x1F475),
+    )
+
+    private val GenderSignBases = intArrayOf(
+        0x1F3C3, // runner
+        0x1F6B6, // walking
+        0x1F9CD, // standing
+        0x1F9CE, // kneeling
+        0x1F9D6, // person in steamy room
+        0x1F9D7, // climbing
+        0x1F3CA, // swimming
+        0x1F3C4, // surfing
+        0x1F6A3, // rowing boat
+        0x1F6B4, // biking
+        0x1F6B5, // mountain biking
+        0x1F3CB, // lifting weights
+        0x1F93C, // wrestling
+        0x1F938, // cartwheel
+        0x26F9,  // bouncing ball
+        0x1F93E, // handball
+        0x1F93D, // water polo
+        0x1F574, // levitating
+        0x1F575, // detective
+        0x1F477, // construction worker
+        0x1F482, // guard
+        0x1F473, // turban
+    )
 
     /**
      * **Special Case 2:** Make `U+1F91D`(🤝 Handshake) in 🧑‍🤝‍🧑 not modifiable
@@ -57,10 +91,7 @@ object EmojiModifier {
     }
 
     private fun isModifiable(modifiable: BooleanArray): Boolean {
-        val sum = modifiable.sumOf { if (it) 1 else 0 }
-        // bail if too crowded
-        // eg. https://emojipedia.org/family-man-medium-light-skin-tone-woman-medium-light-skin-tone-girl-medium-light-skin-tone-boy-medium-light-skin-tone
-        return sum == 1 || sum == 2
+        return modifiable.count { it } in 1..2
     }
 
     @RequiresApi(Build.VERSION_CODES.P)
@@ -94,6 +125,12 @@ object EmojiModifier {
 
     private val DefaultTextPaint = TextPaint()
 
+    private fun buildEmoji(codePoints: IntArray): String {
+        return buildString {
+            codePoints.forEach { appendCodePoint(it) }
+        }
+    }
+
     fun removeSkinToneModifiers(emoji: String): String {
         return buildString {
             emoji.codePoints().forEach { codePoint ->
@@ -110,19 +147,46 @@ object EmojiModifier {
         val (codePoints, modifiable) = getCodePoints(baseEmoji)
         if (!isModifiable(modifiable)) return baseEmoji
         val candidate = buildEmoji(codePoints, modifiable, defaultSkinTone)
-        return if (DefaultTextPaint.hasGlyph(candidate)) candidate else baseEmoji
+        return candidate
     }
 
     fun defaultSkinToneVersion(): String = defaultSkinTone.name
 
-    fun produceSkinTones(emoji: String): Array<String>? {
+    private fun skinToneCandidates(emoji: String): List<String>? {
         if (!isSupported()) return null
         val (codePoints, modifiable) = getCodePoints(removeSkinToneModifiers(emoji))
         if (!isModifiable(modifiable)) return null
-        val candidates = SkinTone.entries
-            .filter { it != defaultSkinTone }
-            .map { buildEmoji(codePoints, modifiable, it) }
-            .filter { DefaultTextPaint.hasGlyph(it) }
+        return SkinTone.entries.map { buildEmoji(codePoints, modifiable, it) }
+    }
+
+    private fun personGenderVariants(emoji: String): List<String> {
+        val codePoints = removeSkinToneModifiers(emoji).codePoints().toArray()
+        val variants = mutableListOf(buildEmoji(codePoints))
+        PersonGenderGroups.forEach { group ->
+            val index = codePoints.indexOfFirst { it in group }
+            if (index >= 0) {
+                group.forEach { replacement ->
+                    val copy = codePoints.copyOf()
+                    copy[index] = replacement
+                    variants += buildEmoji(copy)
+                }
+            }
+        }
+        val first = codePoints.firstOrNull()
+        if (first != null && first in GenderSignBases) {
+            variants += buildEmoji(codePoints + intArrayOf(ZeroWidthJoiner, MaleSign, VariationSelector16))
+            variants += buildEmoji(codePoints + intArrayOf(ZeroWidthJoiner, FemaleSign, VariationSelector16))
+        }
+        return variants.distinct()
+    }
+
+    fun produceSkinTones(emoji: String): Array<String>? {
+        if (!isSupported()) return null
+        val current = getPreferredTone(emoji)
+        val candidates = personGenderVariants(emoji)
+            .flatMap { variant -> skinToneCandidates(variant) ?: listOf(variant) }
+            .filter { it != current }
+            .distinct()
         return if (candidates.isEmpty()) null else candidates.toTypedArray()
     }
 }
