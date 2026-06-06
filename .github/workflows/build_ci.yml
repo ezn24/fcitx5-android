@@ -12,7 +12,8 @@ on:
       - '**/**'
       - '!*.md'
       - '!.gitignore'
-      - '!*.yml'
+      - '!**/*.yml'
+      - '!**/*.yaml'
 
 permissions:
   contents: write
