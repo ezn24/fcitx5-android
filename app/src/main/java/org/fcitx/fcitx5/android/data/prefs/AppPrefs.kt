@@ -49,6 +49,8 @@ class AppPrefs(private val sharedPreferences: SharedPreferences) {
         // Settings initialization flag
         val settingsInitialized = bool("settings_initialized", false)
         val splitKeyboardMigrated = bool("split_keyboard_migrated", false)
+        val lastShareReceiveDirectory = string("last_share_receive_directory", "")
+        val lastShareReceiveDirectoryRemembered = bool("last_share_receive_directory_remembered", false)
     }
 
     inner class Advanced : ManagedPreferenceCategory(R.string.advanced, sharedPreferences) {
@@ -244,6 +246,13 @@ class AppPrefs(private val sharedPreferences: SharedPreferences) {
         val keyboardSidePaddingLandscape: ManagedPreference.PInt
 
         init {
+            val dm = appContext.resources.displayMetrics
+            val shortEdgeDp = (minOf(dm.widthPixels, dm.heightPixels) / dm.density).toInt()
+            val longEdgeDp = (maxOf(dm.widthPixels, dm.heightPixels) / dm.density).toInt()
+            // Keep keyboard width >= 1/2 screen width: sidePadding <= width/4.
+            val portraitMaxPaddingDp = (shortEdgeDp / 4).coerceAtLeast(0)
+            val landscapeMaxPaddingDp = (longEdgeDp / 4).coerceAtLeast(0)
+            val sidePaddingMaxDp = maxOf(portraitMaxPaddingDp, landscapeMaxPaddingDp)
             val (primary, secondary) = twinInt(
                 R.string.keyboard_side_padding,
                 R.string.portrait,
@@ -253,7 +262,7 @@ class AppPrefs(private val sharedPreferences: SharedPreferences) {
                 "keyboard_side_padding_landscape",
                 0,
                 0,
-                300,
+                sidePaddingMaxDp,
                 "dp"
             )
             keyboardSidePadding = primary
@@ -340,6 +349,13 @@ class AppPrefs(private val sharedPreferences: SharedPreferences) {
             R.string.show_candidates_window,
             "show_candidates_window",
             FloatingCandidatesMode.InputDevice
+        )
+
+        val physicalKeyboardHorizontalCandidateBar = switch(
+            R.string.physical_keyboard_horizontal_candidate_bar,
+            "physical_keyboard_horizontal_candidate_bar",
+            false,
+            R.string.physical_keyboard_horizontal_candidate_bar_summary
         )
 
         val orientation = enumList(

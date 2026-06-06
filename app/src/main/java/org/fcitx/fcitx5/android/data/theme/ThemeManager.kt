@@ -6,7 +6,10 @@ package org.fcitx.fcitx5.android.data.theme
 
 import android.content.res.Configuration
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import androidx.annotation.Keep
+import androidx.annotation.MainThread
 import androidx.annotation.RequiresApi
 import androidx.core.content.edit
 import androidx.preference.PreferenceManager
@@ -23,6 +26,10 @@ object ThemeManager {
 
     fun interface OnThemeChangeListener {
         fun onThemeChange(theme: Theme)
+    }
+
+    fun interface OnThemeListChangeListener {
+        fun onThemeListChange(themes: List<Theme>)
     }
 
     val BuiltinThemes = listOf(
@@ -52,15 +59,25 @@ object ThemeManager {
         // 检查是否存在自定义映射配置
         val lightMapping = MonetThemePrefs.getMapping("MonetLight")
         val darkMapping = MonetThemePrefs.getMapping("MonetDark")
+        val lightWaterRippleResource = MonetThemePrefs.getWaterRippleResource("MonetLight")
+        val darkWaterRippleResource = MonetThemePrefs.getWaterRippleResource("MonetDark")
         
         val lightTheme = if (lightMapping != null) {
-            ThemeMonet.createFromMapping(isDark = false, mapping = lightMapping)
+            ThemeMonet.createFromMapping(
+                isDark = false,
+                mapping = lightMapping,
+                waterRippleResource = lightWaterRippleResource
+            )
         } else {
             ThemeMonet.getLight()
         }
         
         val darkTheme = if (darkMapping != null) {
-            ThemeMonet.createFromMapping(isDark = true, mapping = darkMapping)
+            ThemeMonet.createFromMapping(
+                isDark = true,
+                mapping = darkMapping,
+                waterRippleResource = darkWaterRippleResource
+            )
         } else {
             ThemeMonet.getDark()
         }
@@ -78,10 +95,24 @@ object ThemeManager {
     fun getAllThemes() = customThemes + monetThemes + BuiltinThemes
 
     fun refreshThemes() {
+        refreshThemes(ThemeFilesManager.listThemes())
+    }
+
+    fun refreshThemes(refreshedCustomThemes: List<Theme.Custom>) {
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            mainHandler.post { refreshThemes(refreshedCustomThemes) }
+            return
+        }
+        applyRefreshedThemes(refreshedCustomThemes)
+    }
+
+    @MainThread
+    private fun applyRefreshedThemes(refreshedCustomThemes: List<Theme.Custom>) {
         customThemes.clear()
-        customThemes.addAll(ThemeFilesManager.listThemes())
+        customThemes.addAll(refreshedCustomThemes)
         monetThemes = loadMonetThemes()
         activeTheme = evaluateActiveTheme()
+        fireThemeListChange()
     }
 
     /**
@@ -101,6 +132,8 @@ object ThemeManager {
     private var isDarkMode = false
 
     private val onChangeListeners = WeakHashSet<OnThemeChangeListener>()
+    private val onThemeListChangeListeners = WeakHashSet<OnThemeListChangeListener>()
+    private val mainHandler = Handler(Looper.getMainLooper())
 
     fun addOnChangedListener(listener: OnThemeChangeListener) {
         onChangeListeners.add(listener)
@@ -110,8 +143,34 @@ object ThemeManager {
         onChangeListeners.remove(listener)
     }
 
+    fun addOnThemeListChangedListener(listener: OnThemeListChangeListener) {
+        onThemeListChangeListeners.add(listener)
+    }
+
+    fun removeOnThemeListChangedListener(listener: OnThemeListChangeListener) {
+        onThemeListChangeListeners.remove(listener)
+    }
+
     private fun fireChange() {
-        onChangeListeners.forEach { it.onThemeChange(_activeTheme) }
+        val theme = _activeTheme
+        dispatchOnMain {
+            onChangeListeners.toList().forEach { it.onThemeChange(theme) }
+        }
+    }
+
+    private fun fireThemeListChange() {
+        val themes = getAllThemes().toList()
+        dispatchOnMain {
+            onThemeListChangeListeners.toList().forEach { it.onThemeListChange(themes) }
+        }
+    }
+
+    private inline fun dispatchOnMain(crossinline block: () -> Unit) {
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            block()
+        } else {
+            mainHandler.post { block() }
+        }
     }
 
     val prefs = AppPrefs.getInstance().registerProvider(::ThemePrefs)
@@ -123,6 +182,19 @@ object ThemeManager {
         }
         if (activeTheme.name == theme.name) {
             activeTheme = theme
+        }
+        fireThemeListChange()
+    }
+
+    fun nonActiveImportName(name: String): String {
+        if (activeTheme.name != name || getTheme(name) !is Theme.Custom) return name
+        val base = "$name (imported)"
+        if (getTheme(base) == null) return base
+        var index = 2
+        while (true) {
+            val candidate = "$base $index"
+            if (getTheme(candidate) == null) return candidate
+            index++
         }
     }
 
@@ -136,6 +208,7 @@ object ThemeManager {
         if (activeTheme.name == name) {
             activeTheme = evaluateActiveTheme()
         }
+        fireThemeListChange()
     }
 
     fun setNormalModeTheme(theme: Theme) {
@@ -179,6 +252,7 @@ object ThemeManager {
         // `ManagedThemePreference` finds a theme with same name in `getAllThemes()`
         // thus `evaluateActiveTheme()` should be called after updating `monetThemes`
         activeTheme = evaluateActiveTheme()
+        fireThemeListChange()
     }
 
     @RequiresApi(Build.VERSION_CODES.N)

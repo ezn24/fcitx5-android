@@ -208,6 +208,13 @@ sealed class SettingsRoute : Parcelable {
         val min: Int = 0
     ) : SettingsRoute()
 
+    @Serializable
+    data class AddonDirProfileManager(
+        val title: String,
+        val addon: String,
+        val path: String
+    ) : SettingsRoute()
+
     companion object {
         fun createGraph(controller: NavController) = controller.createGraph(Index) {
             val ctx = controller.context
@@ -302,6 +309,7 @@ sealed class SettingsRoute : Parcelable {
                 label = ctx.getString(R.string.english_manage_custom_phrase)
             }
             fragment<GenericMultiSelectFragment, MultiSelect>()
+            fragment<AddonDirProfileManagerFragment, AddonDirProfileManager>()
         }
     }
 }

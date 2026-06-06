@@ -180,7 +180,7 @@ class Fcitx(private val context: Context) : FcitxAPI, FcitxLifecycleOwner {
     override suspend fun activateAction(id: Int) =
         withFcitxContext { activateUserInterfaceAction(id) }
 
-    override suspend fun getCandidates(offset: Int, limit: Int): Array<String> =
+    override suspend fun getCandidates(offset: Int, limit: Int): Array<CandidateWord> =
         withFcitxContext { getFcitxCandidates(offset, limit) ?: emptyArray() }
 
     override suspend fun getCandidateActions(idx: Int): Array<CandidateAction> =
@@ -194,6 +194,9 @@ class Fcitx(private val context: Context) : FcitxAPI, FcitxLifecycleOwner {
 
     override suspend fun offsetCandidatePage(delta: Int) =
         withFcitxContext { offsetFcitxCandidatePage(delta) }
+
+    override suspend fun triggerCandidateListTabAction(id: Int) =
+        withFcitxContext { triggerFcitxCandidateListTabAction(id) }
 
     init {
         if (lifecycle.currentState != FcitxLifecycle.State.STOPPED)
@@ -365,7 +368,7 @@ class Fcitx(private val context: Context) : FcitxAPI, FcitxLifecycleOwner {
         external fun activateUserInterfaceAction(id: Int)
 
         @JvmStatic
-        external fun getFcitxCandidates(offset: Int, limit: Int): Array<String>?
+        external fun getFcitxCandidates(offset: Int, limit: Int): Array<CandidateWord>?
 
         @JvmStatic
         external fun getFcitxCandidateActions(idx: Int): Array<CandidateAction>?
@@ -378,6 +381,9 @@ class Fcitx(private val context: Context) : FcitxAPI, FcitxLifecycleOwner {
 
         @JvmStatic
         external fun offsetFcitxCandidatePage(delta: Int)
+
+        @JvmStatic
+        external fun triggerFcitxCandidateListTabAction(id: Int)
 
         @JvmStatic
         external fun loopOnce()

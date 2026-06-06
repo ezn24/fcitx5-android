@@ -60,6 +60,7 @@ import org.fcitx.fcitx5.android.core.FcitxAPI
 import org.fcitx.fcitx5.android.core.FcitxEvent
 import org.fcitx.fcitx5.android.core.FcitxKeyMapping
 import org.fcitx.fcitx5.android.core.FormattedText
+import org.fcitx.fcitx5.android.core.InputMethodEntry
 import org.fcitx.fcitx5.android.core.KeyState
 import org.fcitx.fcitx5.android.core.KeyStates
 import org.fcitx.fcitx5.android.core.KeySym
@@ -100,6 +101,9 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
     private var jobs = Channel<Job>(capacity = Channel.UNLIMITED)
     private var inputBindingGeneration = 0
     private var inputSessionGeneration = 0
+    private var pendingCandidatePagingMode: Int? = null
+    private var appliedCandidatePagingMode: Int? = null
+    private var candidatePagingModeJob: Job? = null
 
     /**
      * Marks if we're in a critical input lifecycle phase to delay theme changes and avoid race conditions.
@@ -131,10 +135,9 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
     private val navbarMgr = NavigationBarManager()
     internal val inputDeviceManager = InputDeviceManager(
         onChange = { isVirtualKeyboard ->
-            postFcitxJob {
-                setCandidatePagingMode(1)
-            }
+            requestCandidatePagingMode(1)
             currentInputConnection?.monitorCursorAnchor(!isVirtualKeyboard)
+            updateStatusIcon()
             window.window?.let {
                 navbarMgr.evaluate(it, isVirtualKeyboard)
             }
@@ -148,6 +151,11 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
         }
     )
 
+    internal fun restoreVirtualKeyboardForKawaiiBarAction() {
+        if (!inputDeviceManager.isPhysicalCandidateBarMode) return
+        inputDeviceManager.forceVirtualKeyboardForKawaiiBarAction()
+    }
+
     /**
      * Listener for floating candidates mode changes
      * Reset state when switching away from "Always" mode
@@ -157,16 +165,12 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
         // Reset state when switching away from "Always" mode
         if (newMode != FloatingCandidatesMode.Always) {
             // Keep paged candidate mode for consistent highlight + page behavior.
-            postFcitxJob {
-                setCandidatePagingMode(1)
-            }
+            requestCandidatePagingMode(1)
             // Disable cursor anchor monitoring
             currentInputConnection?.monitorCursorAnchor(false)
         } else {
             // Switching to "Always" mode: enable paging mode for digit key selection
-            postFcitxJob {
-                setCandidatePagingMode(1)
-            }
+            requestCandidatePagingMode(1)
             // Enable cursor anchor monitoring for floating candidates positioning
             currentInputConnection?.monitorCursorAnchor(true)
             // Update candidates view position
@@ -230,9 +234,7 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
         // Enable candidate paging mode for "Always" floating mode
         if (useFloatingAlways) {
             android.util.Log.d("FloatingCandidates", "setCandidatePagingMode: 1")
-            postFcitxJob {
-                setCandidatePagingMode(1)
-            }
+            requestCandidatePagingMode(1)
         }
         
         // Enable cursor anchor monitoring to get actual cursor position from app
@@ -266,9 +268,12 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
         // Check if virtual keyboard is visible
         val isKeyboardVisible = inputDeviceManager.isVirtualKeyboard
 
-        // Fallback: if system doesn't provide valid cursor position, use keyboard top
-        if (cursorTop <= 0f || cursorBottom <= 0f) {
-            // Assume cursor is near keyboard top
+        // Fallback: if system doesn't provide valid cursor position,
+        // use keyboard top as reference. Only apply when cursor position
+        // is truly unset (both are 0), not when cursor is above the IME
+        // window (which produces negative values after coordinate transform).
+        if (cursorTop == 0f && cursorBottom == 0f) {
+            // System didn't provide any cursor position, assume near keyboard top
             cursorBottom = keyboardTop
             cursorTop = keyboardTop
         }
@@ -299,6 +304,21 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
     private fun resetComposingState() {
         composing.clear()
         composingText = FormattedText.Empty
+    }
+
+    private fun updateStatusIcon(entry: InputMethodEntry = fcitx.runImmediately { inputMethodEntryCached }) {
+        if (inputDeviceManager.isVirtualKeyboard) {
+            hideStatusIcon()
+            return
+        }
+
+        val iconRes = StatusIconMapping.fromEntry(entry)
+        // Skip placeholder icon when IM info has not been initialized yet.
+        if (entry.uniqueName.isEmpty() && iconRes == R.drawable.ic_baseline_keyboard_24) {
+            hideStatusIcon()
+            return
+        }
+        showStatusIcon(iconRes)
     }
 
     private var cursorUpdateIndex: Int = 0
@@ -411,6 +431,38 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
         return job
     }
 
+    private suspend fun FcitxAPI.applyCandidatePagingModeIfNeeded(mode: Int) {
+        if (appliedCandidatePagingMode == mode) return
+        setCandidatePagingMode(mode)
+        appliedCandidatePagingMode = mode
+    }
+
+    private fun resetCandidatePagingModeCache() {
+        pendingCandidatePagingMode = null
+        appliedCandidatePagingMode = null
+    }
+
+    private fun requestCandidatePagingMode(mode: Int) {
+        pendingCandidatePagingMode = mode
+        if (candidatePagingModeJob?.isActive == true) return
+        val job = postFcitxJob {
+            while (true) {
+                val nextMode = pendingCandidatePagingMode ?: break
+                pendingCandidatePagingMode = null
+                applyCandidatePagingModeIfNeeded(nextMode)
+            }
+        }
+        candidatePagingModeJob = job
+        job.invokeOnCompletion {
+            if (candidatePagingModeJob === job) {
+                candidatePagingModeJob = null
+            }
+            pendingCandidatePagingMode?.let {
+                requestCandidatePagingMode(it)
+            }
+        }
+    }
+
     private fun postFcitxBindingJob(
         expectedGeneration: Int,
         block: suspend FcitxAPI.() -> Unit
@@ -425,6 +477,32 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
     ): Job = postFcitxJob {
         if (expectedGeneration != inputSessionGeneration) return@postFcitxJob
         block()
+    }
+
+    /**
+     * Re-apply the current Android input binding/session state to fcitx.
+     *
+     * This is needed after fcitx process restart (e.g. plugin package replaced) because
+     * Android may keep IME UI visible without re-triggering onBindInput/onStartInput callbacks.
+     */
+    private fun rebindCurrentInputStateToFcitx() {
+        val binding = currentInputBinding
+        if (binding != null) {
+            val uid = binding.uid
+            val pkgName = pkgNameCache.forUid(uid)
+            val bindingGeneration = inputBindingGeneration
+            postFcitxBindingJob(bindingGeneration) {
+                activate(uid, pkgName)
+            }
+        }
+        val editorInfo = currentInputEditorInfo ?: return
+        val shouldFocus = !editorInfo.isTypeNull()
+        val flags = capabilityFlags
+        val inputSessionGeneration = this.inputSessionGeneration
+        postFcitxSessionJob(inputSessionGeneration) {
+            setCapFlags(flags)
+            focus(shouldFocus)
+        }
     }
 
     override fun onCreate() {
@@ -458,6 +536,10 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
 
     private fun handleFcitxEvent(event: FcitxEvent<*>) {
         when (event) {
+            is FcitxEvent.ReadyEvent -> {
+                resetCandidatePagingModeCache()
+                rebindCurrentInputStateToFcitx()
+            }
             is FcitxEvent.CommitStringEvent -> {
                 commitText(event.data.text, event.data.cursor)
             }
@@ -549,6 +631,9 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
                 }
                 // Update space key label in "Always" floating mode
                 inputView?.updateSpaceLabelOnFloatingMode()
+                if (inputDeviceManager.evaluateOnInputMethodActivate()) {
+                    updateStatusIcon(event.data)
+                }
             }
             is FcitxEvent.SwitchInputMethodEvent -> {
                 val (reason) = event.data
@@ -646,7 +731,12 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
             return
         }
         val editorInfo = currentInputEditorInfo
-        if (editorInfo.inputType and InputType.TYPE_MASK_CLASS == InputType.TYPE_NULL) {
+        val type = editorInfo.inputType and InputType.TYPE_MASK_CLASS
+        val variation = editorInfo.inputType and InputType.TYPE_MASK_VARIATION
+        if (type == InputType.TYPE_NULL ||
+            // confirm URL suggestion in browser location bar, see also https://bugzilla.mozilla.org/show_bug.cgi?id=1999915
+            type == InputType.TYPE_CLASS_TEXT && variation == InputType.TYPE_TEXT_VARIATION_URI
+        ) {
             sendDownUpKeyEvents(keyCode)
             return
         }
@@ -897,7 +987,7 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
 
     override fun onComputeInsets(outInsets: Insets) {
         val inputView = this.inputView
-        if (inputView?.isFloating == true) {
+        if (inputView?.isFloating == true && !inputView.isPhysicalCandidateBarMode) {
             // Floating mode: allow app to be full screen (insets.contentTopInsets = screen height)
             // But we need to handle touches.
              outInsets.contentTopInsets = inputView.height
@@ -906,6 +996,25 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
              outInsets.touchableInsets = Insets.TOUCHABLE_INSETS_REGION
              inputView.getFloatingKeyboardRegion(outInsets.touchableRegion)
              return
+        }
+
+        if (inputView?.isPhysicalCandidateBarMode == true) {
+            val location = IntArray(2)
+            inputView.keyboardView.getLocationInWindow(location)
+            val top = location[1]
+
+            outInsets.touchableInsets = Insets.TOUCHABLE_INSETS_REGION
+            inputView.getDockedKeyboardRegion(outInsets.touchableRegion)
+
+            if (top > 0) {
+                outInsets.contentTopInsets = top
+                outInsets.visibleTopInsets = top
+            } else {
+                val h = decorView.height
+                outInsets.contentTopInsets = h
+                outInsets.visibleTopInsets = h
+            }
+            return
         }
 
         if (inputDeviceManager.isVirtualKeyboard) {
@@ -1159,7 +1268,7 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
         }
         onHardwareTypingModeEnter(event)
         // request to show floating CandidatesView when pressing physical keyboard
-        if (inputDeviceManager.evaluateOnKeyDown(event, this)) {
+        if (inputDeviceManager.evaluateOnKeyDown(event)) {
             postFcitxJob {
                 focus(true)
             }
@@ -1213,6 +1322,7 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
     private var firstBindInput = true
 
     override fun onBindInput() {
+        resetCandidatePagingModeCache()
         val uid = currentInputBinding.uid
         val pkgName = pkgNameCache.forUid(uid)
         val bindingGeneration = ++inputBindingGeneration
@@ -1305,9 +1415,11 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
             postFcitxSessionJob(inputSessionGeneration) {
                 focus(true)
                 // Keep paged candidate mode enabled so candidate cursor/highlight is available.
-                setCandidatePagingMode(1)
+                applyCandidatePagingModeIfNeeded(1)
             }
-            if (inputDeviceManager.evaluateOnStartInputView(info, this)) {
+            if (inputDeviceManager.evaluateOnStartInputView(info, this) ||
+                inputDeviceManager.isPhysicalCandidateBarMode
+            ) {
                 inputView?.startInput(info, capabilityFlags, restarting)
             } else {
                 if (currentInputConnection?.monitorCursorAnchor() != true) {
@@ -1316,12 +1428,16 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
                     }
                     workaroundNullCursorAnchorInfo()
                 }
+                // anchor CandidatesView to bottom-left corner in case InputConnection does not
+                // support monitoring CursorAnchorInfo
+                candidatesView?.updateCursorAnchor(contentSize)
             }
         } finally {
             contentView.post {
                 isInInputLifecycleCriticalPhase = false
                 applyPendingThemeIfPossible()
             }
+            updateStatusIcon()
         }
     }
 
@@ -1360,9 +1476,6 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
 
     private val anchorPosition = floatArrayOf(0f, 0f, 0f, 0f)
 
-    /**
-     * anchor candidates view to bottom-left corner, only works if [decorLocationUpdated]
-     */
     private fun workaroundNullCursorAnchorInfo() {
         anchorPosition[0] = 0f
         anchorPosition[1] = contentSize[1]
@@ -1393,7 +1506,7 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
         }
         if (anchorPosition.any(Float::isNaN)) {
             // anchor candidates view to bottom-left corner in case CursorAnchorInfo is invalid
-            workaroundNullCursorAnchorInfo()
+            candidatesView?.updateCursorAnchor(contentSize)
             return
         }
         // params of `Matrix.mapPoints` must be [x0, y0, x1, y1]
@@ -1608,6 +1721,7 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
         postFcitxSessionJob(inputSessionGeneration) {
             focusOutIn()
         }
+        hideStatusIcon()
         showingDialog?.dismiss()
     }
 
@@ -1625,6 +1739,7 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
         cachedKeyEvents.evictAll()
         cachedKeyEventIndex = 0
         cursorUpdateIndex = 0
+        resetCandidatePagingModeCache()
         // currentInputBinding can be null on some devices under some special Multi-screen mode
         val uid = currentInputBinding?.uid ?: return
         val bindingGeneration = inputBindingGeneration

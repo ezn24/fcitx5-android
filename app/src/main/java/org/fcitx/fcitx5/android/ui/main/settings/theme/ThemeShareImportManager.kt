@@ -33,6 +33,7 @@ import org.fcitx.fcitx5.android.data.theme.ThemeManager
 import org.fcitx.fcitx5.android.ui.main.settings.behavior.share.JsonFileQrShareManager
 import org.fcitx.fcitx5.android.ui.main.settings.behavior.share.LayoutQrBitmapUtil
 import org.fcitx.fcitx5.android.ui.main.settings.behavior.share.LayoutQrTransferCodec
+import org.fcitx.fcitx5.android.ui.main.settings.behavior.share.QrScanOptions
 import org.fcitx.fcitx5.android.ui.main.settings.behavior.share.QrChunkCollector
 import org.fcitx.fcitx5.android.utils.importErrorDialog
 import org.fcitx.fcitx5.android.utils.queryFileName
@@ -217,12 +218,7 @@ class ThemeShareImportManager(
         val granted = ContextCompat.checkSelfPermission(fragment.requireContext(), Manifest.permission.CAMERA) ==
             android.content.pm.PackageManager.PERMISSION_GRANTED
         if (granted) {
-            cameraScanLauncher.launch(ScanOptions().apply {
-                setDesiredBarcodeFormats(ScanOptions.QR_CODE)
-                setPrompt(fragment.getString(R.string.text_keyboard_layout_qr_scan_prompt))
-                setBeepEnabled(false)
-                setOrientationLocked(true)
-            })
+            cameraScanLauncher.launch(QrScanOptions.forPrompt(fragment.getString(R.string.text_keyboard_layout_qr_scan_prompt)))
         } else {
             cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
         }
@@ -274,12 +270,7 @@ class ThemeShareImportManager(
             tryImportThemeJson(json)
             return
         }
-        cameraScanLauncher.launch(ScanOptions().apply {
-            setDesiredBarcodeFormats(ScanOptions.QR_CODE)
-            setPrompt(fragment.getString(R.string.text_keyboard_layout_qr_scan_prompt))
-            setBeepEnabled(false)
-            setOrientationLocked(true)
-        })
+        cameraScanLauncher.launch(QrScanOptions.forPrompt(fragment.getString(R.string.text_keyboard_layout_qr_scan_prompt)))
     }
 
     private fun tryAssembleAndImport(chunks: List<String>) {
@@ -344,23 +335,25 @@ class ThemeShareImportManager(
             }
             return
         }
+        val importedName = ThemeManager.nonActiveImportName(theme.name)
+        val themeToSave = theme.copy(name = importedName)
         val existed = ThemeManager.getTheme(theme.name) as? Theme.Custom
-        if (existed != null) {
+        if (existed != null && importedName == theme.name) {
             MaterialAlertDialogBuilder(fragment.requireContext())
                 .setIcon(fragment.requireContext().styledDrawable(android.R.attr.alertDialogIcon))
                 .setTitle(R.string.theme_import_overwrite_title)
                 .setMessage(fragment.getString(R.string.theme_import_overwrite_message, theme.name))
                 .setPositiveButton(android.R.string.ok) { _, _ ->
-                    ThemeManager.saveTheme(theme)
-                    onImported(false, theme, migrated)
+                    ThemeManager.saveTheme(themeToSave)
+                    onImported(false, themeToSave, migrated)
                     fragment.requireContext().toast(R.string.theme_imported_from_qr)
                 }
                 .setNegativeButton(android.R.string.cancel, null)
                 .show()
             return
         }
-        ThemeManager.saveTheme(theme)
-        onImported(true, theme, migrated)
+        ThemeManager.saveTheme(themeToSave)
+        onImported(true, themeToSave, migrated)
         fragment.requireContext().toast(R.string.theme_imported_from_qr)
     }
 
@@ -391,11 +384,16 @@ class ThemeShareImportManager(
                 ctx.importErrorDialog(R.string.exception_theme_name_clash)
                 return@launch
             }
+            val decodedName = preDecoded?.name
+            val importedName = preDecoded?.let { ThemeManager.nonActiveImportName(it.name) }
             val doImport = {
                 fragment.viewLifecycleOwner.lifecycleScope.launch {
                     val result = withContext(Dispatchers.IO) {
                         runCatching {
-                            ThemeFilesManager.importTheme(ByteArrayInputStream(zipBytes)).getOrThrow()
+                            ThemeFilesManager.importTheme(
+                                ByteArrayInputStream(zipBytes),
+                                importedName?.takeIf { it != decodedName }
+                            ).getOrThrow()
                         }
                     }
                     result.onSuccess { (newCreated, theme, migrated) ->
@@ -405,7 +403,7 @@ class ThemeShareImportManager(
                     }
                 }
             }
-            if (existing is Theme.Custom) {
+            if (existing is Theme.Custom && importedName == decodedName) {
                 MaterialAlertDialogBuilder(ctx)
                     .setIcon(ctx.styledDrawable(android.R.attr.alertDialogIcon))
                     .setTitle(R.string.theme_import_overwrite_title)

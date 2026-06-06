@@ -5,25 +5,22 @@
 
 package org.fcitx.fcitx5.android.input.candidates.horizontal
 
+import android.os.SystemClock
+import android.view.inputmethod.EditorInfo
 import android.content.res.Configuration
 import android.graphics.drawable.ShapeDrawable
 import android.graphics.drawable.shapes.RectShape
-import android.widget.PopupMenu
-import androidx.core.text.bold
-import androidx.core.text.buildSpannedString
-import androidx.core.text.color
 import androidx.core.view.updateLayoutParams
-import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.flexbox.FlexboxLayoutManager
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
-import kotlinx.coroutines.launch
 import org.fcitx.fcitx5.android.R
+import org.fcitx.fcitx5.android.core.CapabilityFlags
+import org.fcitx.fcitx5.android.core.CandidateWord
 import org.fcitx.fcitx5.android.core.FcitxEvent
 import org.fcitx.fcitx5.android.daemon.launchOnReady
-import org.fcitx.fcitx5.android.data.InputFeedbacks
 import org.fcitx.fcitx5.android.data.prefs.AppPrefs
 import org.fcitx.fcitx5.android.core.FcitxEvent.PagedCandidateEvent
 import org.fcitx.fcitx5.android.input.bar.ExpandButtonStateMachine.BooleanKey.ExpandedCandidatesEmpty
@@ -38,21 +35,19 @@ import org.fcitx.fcitx5.android.input.candidates.horizontal.HorizontalCandidateM
 import org.fcitx.fcitx5.android.input.dependency.UniqueViewComponent
 import org.fcitx.fcitx5.android.input.dependency.context
 import org.fcitx.fcitx5.android.input.dependency.fcitx
-import org.fcitx.fcitx5.android.input.dependency.inputMethodService
+import org.fcitx.fcitx5.android.input.dependency.inputView
 import org.fcitx.fcitx5.android.input.dependency.theme
-import org.fcitx.fcitx5.android.utils.item
 import org.mechdancer.dependency.manager.must
 import splitties.dimensions.dp
-import splitties.resources.styledColor
 import kotlin.math.max
 
 class HorizontalCandidateComponent :
     UniqueViewComponent<HorizontalCandidateComponent, RecyclerView>(), InputBroadcastReceiver {
 
-    private val service by manager.inputMethodService()
     private val context by manager.context()
     private val fcitx by manager.fcitx()
     private val theme by manager.theme()
+    private val inputView by manager.inputView()
     private val bar: KawaiiBarComponent by manager.must()
 
     private val fillStyle by AppPrefs.getInstance().keyboard.horizontalCandidateStyle
@@ -77,14 +72,22 @@ class HorizontalCandidateComponent :
     private var secondLayoutPassNeeded = false
     private var secondLayoutPassDone = false
     private var highlightMovedInCurrentComposition = false
-    private var lastPagedCandidatesSnapshot: List<String> = emptyList()
+    private var lastPagedCandidatesSnapshot: List<CandidateWord> = emptyList()
     private var lastPagedCursor = -1
     private var lastPagedHasPrev = false
     private var lastPagedData: PagedCandidateEvent.Data? = null
     private var pagedCandidateFlowActive = false
-    private var lastRenderedCandidatesSnapshot: List<String> = emptyList()
+    private var lastPagedEventUptimeMs = 0L
+    private var lastRenderedCandidatesSnapshot: List<CandidateWord> = emptyList()
     private var lastRenderedActiveIndex = Int.MIN_VALUE
     private var pendingLegacyCandidateUpdate: Runnable? = null
+
+    override fun onStartInput(info: EditorInfo, capFlags: CapabilityFlags) {
+        // New input session should not inherit paged-candidate flow state from previous one.
+        pagedCandidateFlowActive = false
+        lastPagedEventUptimeMs = 0L
+        lastPagedData = null
+    }
 
     // Since expanded candidate window is created once the expand button was clicked,
     // we need to replay the last offset
@@ -128,7 +131,7 @@ class HorizontalCandidateComponent :
     }
 
     private fun ensureActiveCandidateVisible(
-        originalCandidates: Array<String>,
+        originalCandidates: Array<CandidateWord>,
         total: Int,
         activeIndex: Int,
     ) {
@@ -177,7 +180,7 @@ class HorizontalCandidateComponent :
                     fcitx.launchOnReady { it.select(idx) }
                 }
                 holder.itemView.setOnLongClickListener {
-                    showCandidateActionMenu(holder)
+                    inputView.showCandidateActionMenu(holder.idx, holder.candidate.text, holder.ui.root)
                     true
                 }
             }
@@ -249,9 +252,17 @@ class HorizontalCandidateComponent :
 
     override fun onCandidateUpdate(data: FcitxEvent.CandidateListEvent.Data) {
         if (pagedCandidateFlowActive && data.total == -1) {
+            val now = SystemClock.uptimeMillis()
+            // Keep preferring paged events only when they are still arriving.
+            // If paged stream is stale (e.g. engine/plugin restarted), fallback to legacy list updates.
+            if (now - lastPagedEventUptimeMs <= 500L) {
+                pendingLegacyCandidateUpdate?.let(view::removeCallbacks)
+                pendingLegacyCandidateUpdate = null
+                return
+            }
+            pagedCandidateFlowActive = false
+            lastPagedData = null
             pendingLegacyCandidateUpdate?.let(view::removeCallbacks)
-            pendingLegacyCandidateUpdate = null
-            return
         }
         lastPagedData = null
         lastRenderedCandidatesSnapshot = emptyList()
@@ -268,21 +279,14 @@ class HorizontalCandidateComponent :
 
     override fun onPagedCandidateUpdate(data: PagedCandidateEvent.Data) {
         pagedCandidateFlowActive = true
+        lastPagedEventUptimeMs = SystemClock.uptimeMillis()
         pendingLegacyCandidateUpdate?.let(view::removeCallbacks)
         pendingLegacyCandidateUpdate = null
         if (data == lastPagedData) {
             return
         }
         lastPagedData = data
-        val candidates = data.candidates.map { candidate ->
-            buildString {
-                append(candidate.text)
-                if (candidate.comment.isNotBlank()) {
-                    append(' ')
-                    append(candidate.comment)
-                }
-            }
-        }.toTypedArray()
+        val candidates = data.candidates
         val cursorIndex = data.cursorIndex
         val normalizedCursor = when {
             cursorIndex in candidates.indices -> cursorIndex
@@ -333,7 +337,7 @@ class HorizontalCandidateComponent :
     }
 
     private fun updateCandidates(
-        candidates: Array<String>,
+        candidates: Array<CandidateWord>,
         total: Int,
         activeIndex: Int,
     ) {
@@ -364,45 +368,6 @@ class HorizontalCandidateComponent :
         // not sure why empty candidates won't trigger `FlexboxLayoutManager#onLayoutCompleted()`
         if (candidates.isEmpty()) {
             refreshExpanded(0)
-        }
-    }
-
-    private fun triggerCandidateAction(idx: Int, actionIdx: Int) {
-        fcitx.runIfReady { triggerCandidateAction(idx, actionIdx) }
-    }
-
-    private var candidateActionMenu: PopupMenu? = null
-
-    fun showCandidateActionMenu(holder: CandidateViewHolder) {
-        val idx = holder.idx
-        val text = holder.text
-        val view = holder.ui.root
-        candidateActionMenu?.dismiss()
-        candidateActionMenu = null
-        service.lifecycleScope.launch {
-            val actions = fcitx.runOnReady { getCandidateActions(idx) }
-            if (actions.isEmpty()) return@launch
-            InputFeedbacks.hapticFeedback(view, longPress = true)
-            candidateActionMenu = PopupMenu(context, view).apply {
-                menu.add(buildSpannedString {
-                    bold {
-                        color(context.styledColor(android.R.attr.colorAccent)) {
-                            append(text)
-                        }
-                    }
-                }).apply {
-                    isEnabled = false
-                }
-                actions.forEach { action ->
-                    menu.item(action.text) {
-                        triggerCandidateAction(idx, action.id)
-                    }
-                }
-                setOnDismissListener {
-                    candidateActionMenu = null
-                }
-                show()
-            }
         }
     }
 }

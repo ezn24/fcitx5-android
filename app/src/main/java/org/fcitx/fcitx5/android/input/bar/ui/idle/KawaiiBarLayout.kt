@@ -121,7 +121,6 @@ class KawaiiBarRecyclerView(context: Context) : RecyclerView(context) {
         val adapter = adapter ?: return
         val childCount = adapter.itemCount
 
-        // Post to ensure layout measurement is complete
         post {
             val parentWidth = width
             if (parentWidth <= 0 || childCount == 0) return@post

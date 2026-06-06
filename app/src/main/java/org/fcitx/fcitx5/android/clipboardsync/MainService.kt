@@ -52,6 +52,7 @@ import org.fcitx.fcitx5.android.clipboardsync.network.SyncClient.ServerBackend
 import org.fcitx.fcitx5.android.clipboardsync.service.QuickSyncTileService
 import org.fcitx.fcitx5.android.clipboardsync.ui.ClipboardCaptureActivity
 import org.fcitx.fcitx5.android.clipboardsync.ui.StoragePathUtils
+import org.fcitx.fcitx5.android.utils.userManager
 import java.io.IOException
 import java.util.Locale
 
@@ -115,8 +116,23 @@ class MainService : FcitxPluginService() {
         private const val MAX_PENDING_UPLOADS = 50
         private const val MAX_SUPPRESSED_REMOTE_ITEMS = 256
 
+        private fun isCredentialStorageUnlocked(context: Context): Boolean {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) return true
+            return context.userManager.isUserUnlocked
+        }
+
+        private fun defaultSharedPreferencesOrNull(context: Context): SharedPreferences? {
+            return try {
+                PreferenceManager.getDefaultSharedPreferences(context)
+            } catch (e: IllegalStateException) {
+                Log.i(TAG, "Skip accessing shared preferences: ${e.message}")
+                null
+            }
+        }
+
         fun shouldAutoStart(context: Context): Boolean {
-            val prefs = PreferenceManager.getDefaultSharedPreferences(context)
+            if (!isCredentialStorageUnlocked(context)) return false
+            val prefs = defaultSharedPreferencesOrNull(context) ?: return false
             return prefs.getBoolean(PREF_QUICK_SYNC, DEFAULT_QUICK_SYNC_ENABLED)
         }
 
@@ -126,7 +142,11 @@ class MainService : FcitxPluginService() {
             forceEnableSync: Boolean = false,
             imeSyncActive: Boolean = false
         ) {
-            val prefs = PreferenceManager.getDefaultSharedPreferences(context)
+            if (!isCredentialStorageUnlocked(context)) {
+                Log.i(TAG, "Skip startSyncService($reason): user storage is still locked")
+                return
+            }
+            val prefs = defaultSharedPreferencesOrNull(context) ?: return
             if (!forceEnableSync && !prefs.getBoolean(PREF_QUICK_SYNC, DEFAULT_QUICK_SYNC_ENABLED)) {
                 return
             }
@@ -142,7 +162,9 @@ class MainService : FcitxPluginService() {
         }
 
         fun stopSyncService(context: Context) {
-            PreferenceManager.getDefaultSharedPreferences(context)
+            if (!isCredentialStorageUnlocked(context)) return
+            val prefs = defaultSharedPreferencesOrNull(context) ?: return
+            prefs
                 .edit()
                 .putBoolean(PREF_IME_SYNC_ACTIVE, false)
                 .apply()
@@ -366,17 +388,13 @@ class MainService : FcitxPluginService() {
     }
 
     override fun onDestroy() {
-        unregisterClipboardListenerIfNeeded()
-        unregisterPrefsListenerIfNeeded()
-        unregisterNetworkCallbackIfNeeded()
-        unregisterScreenStateReceiverIfNeeded()
-        stopPeriodicSync()
-        stopHealthMonitor()
-        stopForegroundState()
-        connectionSessionId += 1
-        connection = null
+        if (serviceRunning) {
+            stop()
+        } else {
+            connectionSessionId += 1
+            connection = null
+        }
         scope.cancel()
-        serviceRunning = false
         selfStarted = false
         super.onDestroy()
     }
@@ -761,8 +779,13 @@ class MainService : FcitxPluginService() {
                 return
             }
 
+            val itemsToImport = if (backend == ServerBackend.SYNCCLIPBOARD) {
+                acceptedItems.takeLast(1)
+            } else {
+                acceptedItems
+            }
             var importedAll = true
-            acceptedItems.forEach { data ->
+            itemsToImport.forEach { data ->
                 val remoteText = data.text
                 Log.d(TAG, "[Pull] Processed data: type=${data.type}, text=$remoteText")
                 acknowledgePendingUploads(remoteText)
@@ -779,7 +802,7 @@ class MainService : FcitxPluginService() {
                 return
             }
 
-            val latestItem = acceptedItems.last()
+            val latestItem = itemsToImport.last()
             val remoteText = latestItem.text
             if (
                 remoteText.isNotEmpty() &&
@@ -1422,7 +1445,7 @@ class MainService : FcitxPluginService() {
         val normalized = contents
             .asSequence()
             .map(String::trim)
-            .filter { it.startsWith("content://") || it.startsWith("file://") }
+            .filter { it.isNotEmpty() }
             .distinct()
             .toList()
         if (normalized.isEmpty()) return
@@ -1440,9 +1463,8 @@ class MainService : FcitxPluginService() {
     }
 
     private fun isSuppressedRemoteClipboard(data: ClipboardData): Boolean {
-        val remoteText = data.text
-            .takeIf { it.startsWith("content://") || it.startsWith("file://") }
-            ?: return false
+        val remoteText = data.text.trim()
+        if (remoteText.isEmpty()) return false
         synchronized(suppressedRemoteClipboardContents) {
             return remoteText in suppressedRemoteClipboardContents
         }
@@ -1870,7 +1892,7 @@ class MainService : FcitxPluginService() {
                     stateJson.decodeFromString<List<String>>(serialized)
                 }.onSuccess { restored ->
                     restored.forEach { item ->
-                        if (item.startsWith("content://") || item.startsWith("file://")) {
+                        if (item.isNotBlank()) {
                             suppressedRemoteClipboardContents.add(item)
                         }
                     }

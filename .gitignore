@@ -108,3 +108,5 @@ lint/tmp/
 
 ### Kotlin ###
 .kotlin/
+
+.vscode/settings.json

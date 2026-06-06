@@ -26,6 +26,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
 import org.fcitx.fcitx5.android.R
 import org.fcitx.fcitx5.android.core.CapabilityFlag
 import org.fcitx.fcitx5.android.core.CapabilityFlags
@@ -86,13 +87,12 @@ import splitties.views.dsl.core.lParams
 import splitties.views.dsl.core.matchParent
 import java.util.concurrent.Executor
 import kotlin.coroutines.resume
-import kotlin.coroutines.suspendCoroutine
+import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.hypot
 import kotlin.math.min
-import kotlin.math.PI
 import kotlin.math.sin
 
 class KawaiiBarComponent : UniqueViewComponent<KawaiiBarComponent, FrameLayout>(),
@@ -116,6 +116,10 @@ class KawaiiBarComponent : UniqueViewComponent<KawaiiBarComponent, FrameLayout>(
 
     fun setOneHandKeyboardState(isOneHanded: Boolean) {
         idleUi.buttonsUi.setOneHandKeyboardState(isOneHanded)
+    }
+
+    fun refreshButtonsLayout() {
+        idleUi.buttonsUi.refreshLayout()
     }
 
     private val prefs = AppPrefs.getInstance()
@@ -192,6 +196,7 @@ class KawaiiBarComponent : UniqueViewComponent<KawaiiBarComponent, FrameLayout>(
             delay(timeout)
             isClipboardFresh = false
             clipboardTimeoutJob = null
+            evalIdleUiState()
         }
     }
 
@@ -215,13 +220,18 @@ class KawaiiBarComponent : UniqueViewComponent<KawaiiBarComponent, FrameLayout>(
         idleUi.updateState(newState, fromUser)
     }
 
-    private val hideKeyboardCallback = View.OnClickListener {
+    private fun hideKeyboardAndExitAdjustingMode() {
+        service.inputView?.exitAdjustingMode()
         service.requestHideSelf(0)
+    }
+
+    private val hideKeyboardCallback = View.OnClickListener {
+        hideKeyboardAndExitAdjustingMode()
     }
 
     private val swipeDownExpandCallback = CustomGestureView.OnGestureListener { _, e ->
         if (e.type == CustomGestureView.GestureType.Up && e.totalY > 0) {
-            service.requestHideSelf(0)
+            hideKeyboardAndExitAdjustingMode()
             true
         } else false
     }
@@ -261,7 +271,7 @@ class KawaiiBarComponent : UniqueViewComponent<KawaiiBarComponent, FrameLayout>(
                     val thresholdY = v.swipeThresholdY
                     val handled = when (angle) {
                         in -45f..45f if distance > thresholdY -> {
-                            service.requestHideSelf(0)
+                            hideKeyboardAndExitAdjustingMode()
                             true
                         }
                         !in -45f..45f if distance > thresholdX -> {
@@ -280,7 +290,7 @@ class KawaiiBarComponent : UniqueViewComponent<KawaiiBarComponent, FrameLayout>(
         }
 
         if (e.type == CustomGestureView.GestureType.Up && abs(e.totalY) > abs(e.totalX) && e.totalY > 0) {
-            service.requestHideSelf(0)
+            hideKeyboardAndExitAdjustingMode()
             true
         } else false
     }
@@ -319,7 +329,12 @@ class KawaiiBarComponent : UniqueViewComponent<KawaiiBarComponent, FrameLayout>(
         }
 
     private fun setupIdleUiCallbacks(ui: IdleUi) {
+        fun restoreVirtualKeyboardMode() {
+            service.restoreVirtualKeyboardForKawaiiBarAction()
+        }
+
         ui.menuButton.setOnClickListener {
+            restoreVirtualKeyboardMode()
             if (service.inputView?.isButtonsAdjustingOverlayVisible == true) {
                 service.inputView?.hideButtonsAdjustingOverlay()
                 return@setOnClickListener
@@ -344,6 +359,7 @@ class KawaiiBarComponent : UniqueViewComponent<KawaiiBarComponent, FrameLayout>(
             }
         }
         ui.menuButton.setOnLongClickListener {
+            restoreVirtualKeyboardMode()
             if (service.inputView?.isButtonsAdjustingOverlayVisible == true) {
                 service.inputView?.hideButtonsAdjustingOverlay()
             } else {
@@ -352,7 +368,10 @@ class KawaiiBarComponent : UniqueViewComponent<KawaiiBarComponent, FrameLayout>(
             true
         }
         ui.hideKeyboardButton.apply {
-            setOnClickListener(hideKeyboardCallback)
+            setOnClickListener {
+                restoreVirtualKeyboardMode()
+                hideKeyboardCallback.onClick(it)
+            }
             swipeEnabled = true
             swipeThresholdY = dp(HEIGHT.toFloat())
             onGestureListener = swipeHideKeyboardCallback
@@ -361,6 +380,7 @@ class KawaiiBarComponent : UniqueViewComponent<KawaiiBarComponent, FrameLayout>(
             // Setup click listeners using ButtonAction
             ButtonAction.allConfigurableActions.forEach { action ->
                 setOnClickListener(action.id) {
+                    restoreVirtualKeyboardMode()
                     action.execute(
                         context = context,
                         service = service,
@@ -380,10 +400,12 @@ class KawaiiBarComponent : UniqueViewComponent<KawaiiBarComponent, FrameLayout>(
             
             // Special handling for 'more' button
             setOnClickListener("more") {
+                restoreVirtualKeyboardMode()
                 windowManager.attachWindow(StatusAreaWindow())
             }
 
             setOnClickListener("floating_toggle") {
+                restoreVirtualKeyboardMode()
                 val action = ButtonAction.fromId("floating_toggle")
                 if (onFloatingToggleListener != null) {
                     onFloatingToggleListener?.invoke()
@@ -401,6 +423,7 @@ class KawaiiBarComponent : UniqueViewComponent<KawaiiBarComponent, FrameLayout>(
             }
 
             setOnLongClickListener("floating_toggle") {
+                restoreVirtualKeyboardMode()
                 if (onFloatingLongPressListener != null) {
                     onFloatingLongPressListener?.invoke()
                 } else {
@@ -417,6 +440,7 @@ class KawaiiBarComponent : UniqueViewComponent<KawaiiBarComponent, FrameLayout>(
 
             // Keep language switch long-press behavior aligned with keyboard globe key.
             setOnLongClickListener("language_switch") {
+                restoreVirtualKeyboardMode()
                 ButtonAction.fromId("language_switch")?.onLongPress(
                     context = context,
                     service = service,
@@ -502,6 +526,7 @@ class KawaiiBarComponent : UniqueViewComponent<KawaiiBarComponent, FrameLayout>(
     // set expand candidate button to create expand candidate
     private fun setExpandButtonToAttach() {
         candidateUi.expandButton.setOnClickListener {
+            service.restoreVirtualKeyboardForKawaiiBarAction()
             windowManager.attachWindow(
                 when (expandedCandidateStyle) {
                     ExpandedCandidateStyle.Grid -> GridExpandedCandidateWindow()
@@ -516,6 +541,7 @@ class KawaiiBarComponent : UniqueViewComponent<KawaiiBarComponent, FrameLayout>(
     // set expand candidate button to close expand candidate
     private fun setExpandButtonToDetach() {
         candidateUi.expandButton.setOnClickListener {
+            service.restoreVirtualKeyboardForKawaiiBarAction()
             windowManager.attachWindow(KeyboardWindow)
         }
         candidateUi.expandButton.setIcon(R.drawable.ic_baseline_expand_less_24)
@@ -576,9 +602,17 @@ class KawaiiBarComponent : UniqueViewComponent<KawaiiBarComponent, FrameLayout>(
         voiceInputSubtype = InputMethodUtil.findVoiceSubtype(preferredVoiceInput)
         val shouldShowVoiceInput =
             showVoiceInputButton && voiceInputSubtype != null && !capFlags.has(CapabilityFlag.Password)
+        val hideKeyboardOrVoiceCallback = if (shouldShowVoiceInput) {
+            switchToVoiceInputCallback
+        } else {
+            hideKeyboardCallback
+        }
         idleUi.setHideKeyboardIsVoiceInput(
             shouldShowVoiceInput,
-            if (shouldShowVoiceInput) switchToVoiceInputCallback else hideKeyboardCallback
+            View.OnClickListener { view ->
+                service.restoreVirtualKeyboardForKawaiiBarAction()
+                hideKeyboardOrVoiceCallback.onClick(view)
+            }
         )
         evalIdleUiState()
     }
@@ -590,7 +624,8 @@ class KawaiiBarComponent : UniqueViewComponent<KawaiiBarComponent, FrameLayout>(
     override fun onCandidateUpdate(data: CandidateListEvent.Data) {
         // When using "Always" floating mode, don't show candidates in Kawaii Bar
         val floatingMode = AppPrefs.getInstance().candidates.mode.getValue()
-        val useFloatingAlways = floatingMode == FloatingCandidatesMode.Always
+        val useFloatingAlways =
+            floatingMode == FloatingCandidatesMode.Always && !service.inputDeviceManager.isPhysicalCandidateBarMode
 
         if (useFloatingAlways) {
             // Force stay in Idle state when using floating candidates
@@ -671,7 +706,7 @@ class KawaiiBarComponent : UniqueViewComponent<KawaiiBarComponent, FrameLayout>(
 
     @RequiresApi(Build.VERSION_CODES.R)
     private suspend fun inflateInlineContentView(suggestion: InlineSuggestion): InlineContentView? {
-        return suspendCoroutine { c ->
+        return suspendCancellableCoroutine { c ->
             // callback view might be null
             suggestion.inflate(context, suggestionSize, directExecutor) { v ->
                 c.resume(v)

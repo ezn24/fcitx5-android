@@ -23,8 +23,6 @@ import org.fcitx.fcitx5.android.data.prefs.AppPrefs
 import org.fcitx.fcitx5.android.data.theme.ThemeManager
 import org.fcitx.fcitx5.android.input.config.ConfigProvider
 import org.fcitx.fcitx5.android.input.config.ConfigProviders
-import org.fcitx.fcitx5.android.input.config.DefaultConfigProvider
-import org.fcitx.fcitx5.android.input.config.MemoryConfigProvider
 import org.fcitx.fcitx5.android.input.keyboard.TextKeyboard
 import org.fcitx.fcitx5.android.ui.main.settings.preview.PreviewInputMethodEntry
 import org.fcitx.fcitx5.android.ui.main.settings.behavior.utils.LayoutJsonUtils
@@ -53,7 +51,8 @@ import java.io.File
 class KeyboardPreviewManager(
     private val context: Context,
     private val previewContainer: ViewGroup,
-    private val entries: Map<String, List<List<Map<String, Any?>>>>
+    private val entries: Map<String, List<List<Map<String, Any?>>>>,
+    private val layoutHeightPercentOverrideProvider: (String) -> Int? = { null }
 ) {
     private var previewKeyboard: TextKeyboard? = null
     private val previewBlurMask by lazy { PreviewKeyBlurMaskView(context) }
@@ -74,7 +73,8 @@ class KeyboardPreviewManager(
 
         // Try to load submode-specific layout first
         val subModeKey = previewSubModeLabel?.let { "$layoutName:$it" }
-        val rows = subModeKey?.let { entries[it] } ?: entries[layoutName] ?: return
+        val effectiveLayoutKey = subModeKey?.takeIf { entries.containsKey(it) } ?: layoutName
+        val rows = entries[effectiveLayoutKey] ?: return
 
         val theme = ThemeManager.activeTheme
         val keyBorder = ThemeManager.prefs.keyBorder.getValue()
@@ -99,19 +99,24 @@ class KeyboardPreviewManager(
         ConfigProviders.provider = tempProvider
         TextKeyboard.clearCachedKeyDefLayouts()
 
-        // Save the original IME state to restore later
+        // Save the original IME state to restore later.
+        // Keep this purely in-process to avoid blocking Binder calls on UI thread.
         val originalIme = TextKeyboard.ime
+        var appliedPreviewIme: org.fcitx.fcitx5.android.core.InputMethodEntry? = null
 
         try {
-            createKeyboardPreview(layoutName, previewSubModeLabel, fcitxConnection)
+            appliedPreviewIme = createKeyboardPreview(layoutName, previewSubModeLabel, fcitxConnection)
         } catch (e: Exception) {
             android.util.Log.e("KeyboardPreview", "Failed to create keyboard preview for layout: $layoutName, submode: $previewSubModeLabel", e)
             showError(e.message ?: "Unknown error")
         } finally {
             // Restore original provider and IME state
-            ConfigProviders.provider = DefaultConfigProvider
+            ConfigProviders.provider = provider
             TextKeyboard.clearCachedKeyDefLayouts()
-            TextKeyboard.ime = originalIme
+            // Avoid clobbering real IME updates that may happen while preview is rendering.
+            if (appliedPreviewIme != null && TextKeyboard.ime === appliedPreviewIme) {
+                TextKeyboard.ime = originalIme
+            }
         }
     }
 
@@ -164,17 +169,24 @@ class KeyboardPreviewManager(
         layoutName: String,
         previewSubModeLabel: String?,
         fcitxConnection: FcitxConnection
-    ) {
+    ): org.fcitx.fcitx5.android.core.InputMethodEntry {
         val theme = ThemeManager.activeTheme
 
         previewKeyboard = TextKeyboard(context, theme).apply {
             val displayMetrics = context.resources.displayMetrics
             val screenHeight = displayMetrics.heightPixels
 
-            // Get keyboard height percentage from preferences
+            val subModeKey = previewSubModeLabel?.let { "$layoutName:$it" }
+            val effectiveLayoutKey = subModeKey?.takeIf { entries.containsKey(it) } ?: layoutName
+            val rows = entries[effectiveLayoutKey].orEmpty()
+
+            // Get keyboard height percentage from layout override or preferences
             val keyboardPrefs = AppPrefs.getInstance().keyboard
-            val heightPercent = keyboardPrefs.keyboardHeightPercent.getValue()
-            val keyboardHeight = screenHeight * heightPercent / 100
+            val basePercent = layoutHeightPercentOverrideProvider(effectiveLayoutKey)
+                ?: keyboardPrefs.keyboardHeightPercent.getValue()
+            val rowScale = computeRowHeightScale(rows)
+            val effectivePercent = (basePercent * rowScale).coerceIn(10f, 90f)
+            val keyboardHeight = (screenHeight * effectivePercent / 100f).toInt()
 
             // Get keyboard side and bottom padding from preferences
             val sidePadding = keyboardPrefs.keyboardSidePadding.getValue()
@@ -197,11 +209,10 @@ class KeyboardPreviewManager(
 
             onAttach()
 
-            // Get current IME and create preview IME
-            val currentIme = runCatching {
-                fcitxConnection.runImmediately { inputMethodEntryCached }
-            }.getOrNull()
-
+            // Create preview IME from the currently cached in-process IME state.
+            // Avoid runImmediately() here because updatePreview is called very frequently
+            // during editing and can ANR when host IME and editor contend for the same IPC path.
+            val currentIme = TextKeyboard.ime
             val previewIme = PreviewInputMethodEntry.create(
                 layoutName = layoutName,
                 subModeLabel = previewSubModeLabel,
@@ -216,7 +227,36 @@ class KeyboardPreviewManager(
             post { previewBlurMask.refreshMask(hierarchyChanged = true) }
             requestLayout()
             invalidate()
+
+            return previewIme
         }
+    }
+
+    private fun computeRowHeightScale(rows: List<List<Map<String, Any?>>>): Float {
+        if (rows.isEmpty()) return 1f
+
+        val parsedPercents = rows.map { row ->
+            row.mapNotNull { key ->
+                (key["rowHeightPercent"] as? Number)?.toFloat()
+                    ?: (key["rowHeightPercent"] as? String)?.trim()?.toFloatOrNull()
+            }.maxOrNull()?.takeIf { it in 1f..100f }
+        }
+
+        val definedSum = parsedPercents.filterNotNull().sum()
+        val undefinedCount = parsedPercents.count { it == null }
+
+        val distributed = if (undefinedCount == 0) {
+            parsedPercents.map { it ?: 0f }
+        } else {
+            val remaining = (100f - definedSum).coerceAtLeast(0f)
+            val avg = remaining / undefinedCount
+            parsedPercents.map { it ?: avg }
+        }
+
+        val sum = distributed.sum()
+        if (sum <= 0f) return 1f
+        val normalized = distributed.map { it * 100f / sum }
+        return (normalized.sum() / 100f).coerceAtLeast(0.1f)
     }
 
     /**
@@ -249,15 +289,18 @@ class KeyboardPreviewManager(
      * @return Bitmap of the preview keyboard, or null if no preview is available
      */
     fun getPreviewBitmap(): Bitmap? {
-        val keyboard = previewKeyboard ?: return null
-
-        val targetView = if (previewContainer.width > 0 && previewContainer.height > 0) {
+        val keyboard = previewKeyboard
+        val targetView: View = if (previewContainer.width > 0 && previewContainer.height > 0) {
+            previewContainer
+        } else if (keyboard != null) {
+            keyboard
+        } else if (previewContainer.childCount > 0) {
             previewContainer
         } else {
-            keyboard
+            return null
         }
-        val width = targetView.width
-        val height = targetView.height
+        val width = if (targetView.width > 0) targetView.width else targetView.measuredWidth
+        val height = if (targetView.height > 0) targetView.height else targetView.measuredHeight
         if (width <= 0 || height <= 0) return null
 
         // Directly render the current view tree into bitmap

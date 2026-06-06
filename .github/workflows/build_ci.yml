@@ -14,6 +14,7 @@ on:
       - '!.gitignore'
       - '!**/*.yml'
       - '!**/*.yaml'
+      - '!docs/**'
 
 permissions:
   contents: write

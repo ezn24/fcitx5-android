@@ -22,6 +22,7 @@ import org.fcitx.fcitx5.android.input.config.ConfigurableButton
 import splitties.dimensions.dp
 import splitties.views.dsl.core.Ui
 import splitties.views.dsl.core.view
+import kotlin.math.max
 
 class ButtonsBarUi(
     override val ctx: Context,
@@ -42,6 +43,8 @@ class ButtonsBarUi(
 
     // Map to store button references by ID
     private val buttonMap = mutableMapOf<String, ToolButton>()
+    // Keep per-button active state so recycled/rebound views always restore correct tint.
+    private val buttonActiveMap = mutableMapOf<String, Boolean>()
 
     // Click listeners for each button
     private val clickListeners = mutableMapOf<String, View.OnClickListener>()
@@ -56,8 +59,6 @@ class ButtonsBarUi(
         val recyclerView = root
         // Recreate adapter to ensure clean state
         recyclerView.adapter = ButtonsBarAdapter()
-        // Update layout mode immediately (width should be available from previous layout)
-        recyclerView.updateLayoutMode()
     }
 
     fun updateConfig(newButtons: List<ConfigurableButton>) {
@@ -111,11 +112,20 @@ class ButtonsBarUi(
     fun getButton(buttonId: String): ToolButton? = buttonMap[buttonId]
 
     fun setFloatingState(isFloating: Boolean) {
+        buttonActiveMap["floating_toggle"] = isFloating
         buttonMap["floating_toggle"]?.setActive(isFloating)
     }
 
     fun setOneHandKeyboardState(isOneHanded: Boolean) {
+        buttonActiveMap["one_handed_keyboard"] = isOneHanded
         buttonMap["one_handed_keyboard"]?.setActive(isOneHanded)
+    }
+
+    fun refreshLayout() {
+        val recyclerView = root
+        recyclerView.layoutManager?.requestLayout()
+        recyclerView.adapter?.notifyDataSetChanged()
+        recyclerView.requestLayout()
     }
 
     /**
@@ -123,7 +133,9 @@ class ButtonsBarUi(
      */
     fun updateButtonsState(service: FcitxInputMethodService) {
         ButtonAction.allConfigurableActions.forEach { action ->
-            buttonMap[action.id]?.setActive(action.isActive(service))
+            val active = action.isActive(service)
+            buttonActiveMap[action.id] = active
+            buttonMap[action.id]?.setActive(active)
         }
     }
 
@@ -164,6 +176,8 @@ class ButtonsBarUi(
             val parentWidth = recyclerView.width
             val childCount = itemCount
             val button = holder.button
+            val config = buttons[position]
+            buttonMap[config.id] = button
 
             val params = holder.button.layoutParams as FlexboxLayoutManager.LayoutParams
 
@@ -201,7 +215,7 @@ class ButtonsBarUi(
                         }
                     }
                     // Even distribution mode: Set fixed width for each button
-                    params.width = idealWidth
+                    params.width = max(idealWidth, kawaiiBarLayout.minButtonWidth)
                     params.minWidth = 0
                     button.image.scaleType = ImageView.ScaleType.CENTER_INSIDE
                 }
@@ -210,6 +224,7 @@ class ButtonsBarUi(
                 params.width = ViewGroup.LayoutParams.WRAP_CONTENT
                 params.minWidth = kawaiiBarLayout.minButtonWidth
             }
+            button.setActive(buttonActiveMap[config.id] == true)
         }
 
         override fun getItemViewType(position: Int): Int {

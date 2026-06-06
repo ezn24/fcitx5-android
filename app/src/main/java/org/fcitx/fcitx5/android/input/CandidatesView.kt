@@ -137,6 +137,7 @@ class CandidatesView(
     private val candidatesUi = PagedCandidatesUi(
         ctx, theme, setupTextView,
         onCandidateClick = { index -> fcitx.launchOnReady { it.select(index) } },
+        onCandidateAction = { index, text, view -> showCandidateActionMenu(index, text, view) },
         onPrevPage = { fcitx.launchOnReady { it.offsetCandidatePage(-1) } },
         onNextPage = { fcitx.launchOnReady { it.offsetCandidatePage(1) } },
         highlightRadius = dp(highlightRadius).toFloat()
@@ -206,6 +207,11 @@ class CandidatesView(
             calculatePositionByCursorAnchor(parentWidth, parentHeight, selfWidth, selfHeight)
         }
         
+        if (tX.isNaN() || tY.isNaN()) {
+            translationX = 0f
+            translationY = 0f
+            return
+        }
         translationX = tX
         translationY = tY
         // update touchEventReceiverWindow's position after CandidatesView's
@@ -268,7 +274,7 @@ class CandidatesView(
         val bottomReference = if (isKeyboardVisible) keyboardTop else parentHeight
 
         val tX = calculateHorizontalPosition(parentWidth, selfWidth, gap)
-        val tY = calculateVerticalPositionForAlwaysMode(
+        var tY = calculateVerticalPositionForAlwaysMode(
             parentHeight = parentHeight,
             selfHeight = selfHeight,
             cursorTop = cursorTop,
@@ -276,6 +282,26 @@ class CandidatesView(
             bottomReference = bottomReference,
             gap = gap
         )
+
+        // For Bottom positions with visible keyboard: ensure candidate window
+        // does not extend below keyboard top (overlapping the keyboard).
+        // For tall windows (e.g. vertical layout), let the top clip naturally
+        // instead of forcing it to the top of the screen.
+        if (isKeyboardVisible) {
+            when (floatingPosition) {
+                FloatingCandidatesVirtualKeyboardPosition.BottomLeft,
+                FloatingCandidatesVirtualKeyboardPosition.BottomRight -> {
+                    val candidateBottom = tY + selfHeight
+                    val maxAllowedBottom = bottomReference - gap
+                    if (candidateBottom > maxAllowedBottom) {
+                        // Window would overlap keyboard area.
+                        // Align to keyboard top — tall windows will clip at the top.
+                        tY = bottomReference - gap - selfHeight
+                    }
+                }
+                else -> { /* Top positions don't need this constraint */ }
+            }
+        }
 
         return Pair(tX, tY)
     }
@@ -328,17 +354,47 @@ class CandidatesView(
             }
             FloatingCandidatesVirtualKeyboardPosition.BottomLeft,
             FloatingCandidatesVirtualKeyboardPosition.BottomRight -> {
-                val belowCursorY = cursorBottom + gap
-                val spaceBelow = bottomReference - (belowCursorY + selfHeight)
-                if (spaceBelow < switchThreshold) {
+                // Default placement: right above the keyboard top (bottomReference).
+                // Only shift if the candidate window would overlap the cursor.
+                // Don't coerce to gap here — tall windows (e.g. vertical layout)
+                // should align to keyboard top and clip from the top, rather than
+                // getting pushed to the top and covering the cursor entirely.
+                val atKeyboardTop = bottomReference - gap - selfHeight
+
+                // Check if placing at keyboard top would overlap cursor:
+                // window [atKeyboardTop .. atKeyboardTop+selfHeight] vs cursor [cursorTop .. cursorBottom]
+                val wouldOverlapCursor = cursorBottom > 0f && cursorTop > 0f &&
+                        atKeyboardTop + selfHeight > cursorTop && atKeyboardTop < cursorBottom
+
+                if (!wouldOverlapCursor) {
+                    // Safe to place at keyboard top
+                    atKeyboardTop
+                } else if (cursorBottom <= bottomReference) {
+                    // Cursor is above keyboard top and would overlap.
+                    // Try to place above cursor.
                     val spaceAbove = cursorTop - gap
                     if (spaceAbove >= selfHeight) {
                         cursorTop - gap - selfHeight
                     } else {
-                        (bottomReference - gap - selfHeight).coerceAtLeast(gap)
+                        // Not enough room above cursor — align to keyboard top
+                        // (window will clip at top if too tall)
+                        atKeyboardTop
                     }
                 } else {
-                    belowCursorY
+                    // Cursor extends below keyboard top (unusual for virtual keyboard).
+                    // Try below cursor first, then above cursor, then keyboard top.
+                    val belowCursorY = cursorBottom + gap
+                    val spaceBelow = bottomReference - (belowCursorY + selfHeight)
+                    if (spaceBelow < switchThreshold) {
+                        val spaceAbove = cursorTop - gap
+                        if (spaceAbove >= selfHeight) {
+                            cursorTop - gap - selfHeight
+                        } else {
+                            atKeyboardTop
+                        }
+                    } else {
+                        belowCursorY
+                    }
                 }
             }
         }
@@ -497,8 +553,30 @@ class CandidatesView(
         parentSize[0] = parentWidth
         parentSize[1] = parentHeight
 
-        cursorTop = top
-        cursorBottom = bottom
+        // When cursor anchor info is unavailable (both top and bottom are 0),
+        // use position-aware fallback cursor values so the overlap-avoidance
+        // logic can still make reasonable placement decisions.
+        if (top == 0f && bottom == 0f) {
+            when (floatingPosition) {
+                FloatingCandidatesVirtualKeyboardPosition.TopLeft,
+                FloatingCandidatesVirtualKeyboardPosition.TopRight -> {
+                    // Assume cursor is near the top of the input area.
+                    // A small non-zero value triggers "place below cursor"
+                    // so the window does not cover the likely cursor position.
+                    val estimatedCursorY = candidatesGap * 4f + dp(20).toFloat()
+                    cursorTop = estimatedCursorY
+                    cursorBottom = estimatedCursorY
+                }
+                else -> {
+                    // Bottom positions: assume cursor is at keyboard top
+                    cursorTop = keyboardTop
+                    cursorBottom = keyboardTop
+                }
+            }
+        } else {
+            cursorTop = top
+            cursorBottom = bottom
+        }
         this.keyboardBounds[1] = keyboardTop
 
         useKeyboardPosition = false
@@ -515,6 +593,16 @@ class CandidatesView(
         val (left, top, right, bottom) = bounds
         val (parentWidth, parentHeight) = parent
 
+        // Store actual keyboard bounds for use in position calculations
+        keyboardBounds[0] = left
+        keyboardBounds[1] = top
+        keyboardBounds[2] = right
+        keyboardBounds[3] = bottom
+
+        // Update cursor position for overlap-avoidance logic
+        cursorTop = cursorY
+        cursorBottom = cursorY
+
         anchorPosition[0] = right
         anchorPosition[1] = cursorY
         anchorPosition[2] = cursorY
@@ -524,6 +612,21 @@ class CandidatesView(
         parentSize[1] = parentHeight
         useKeyboardPosition = false
         this.isVirtualKeyboardVisible = isKeyboardVisible
+        updatePosition()
+    }
+
+    /**
+     * Anchor candidates view to bottom-left corner, takes navbar bottom insets into consideration.
+     * Should only be used when [CursorAnchorInfo][android.view.inputmethod.CursorAnchorInfo] is invalid
+     */
+    fun updateCursorAnchor(@Size(2) parent: FloatArray) {
+        val (parentWidth, parentHeight) = parent
+        val bottom = parentHeight - bottomInsets
+        anchorPosition[0] = 0f
+        anchorPosition[1] = bottom
+        anchorPosition[2] = bottom
+        parentSize[0] = parentWidth
+        parentSize[1] = parentHeight
         updatePosition()
     }
 

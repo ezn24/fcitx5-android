@@ -20,9 +20,13 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-permission
         android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
+    <uses-permission
+        android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="28" />
 
     <!-- remove intent queries merged from library manifest (namely Android-Image-Cropper) -->
     <queries tools:node="removeAll" />
@@ -66,7 +70,7 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.FcitxAppTheme"
         android:usesCleartextTraffic="true"
-        tools:replace="android:supportsRtl,android:networkSecurityConfig,android:usesCleartextTraffic"
+        tools:replace="android:supportsRtl"
         tools:targetApi="33">
         <activity
             android:name=".ui.setup.SetupActivity"
@@ -118,6 +122,22 @@
             android:exported="false"
             android:label="@string/edit_text_keyboard_layout" />
         <activity
+            android:name=".ui.main.settings.behavior.dialog.LayoutNameInputActivity"
+            android:exported="false"
+            android:label="@string/edit_text_keyboard_layout" />
+        <activity
+            android:name=".ui.main.update.UpdateCheckActivity"
+            android:exported="false"
+            android:label="@string/update_page_title" />
+        <activity
+            android:name=".ui.main.update.UpdateHostsSettingsActivity"
+            android:exported="false"
+            android:label="@string/update_hosts_settings_title" />
+        <activity
+            android:name=".ui.main.update.UpdateMirrorEditActivity"
+            android:exported="false"
+            android:label="@string/update_mirror_edit_title" />
+        <activity
             android:name=".ui.main.settings.behavior.dialog.TextKeyboardLayoutProfilePickerActivity"
             android:autoRemoveFromRecents="true"
             android:excludeFromRecents="true"
@@ -125,6 +145,13 @@
             android:launchMode="singleInstance"
             android:taskAffinity=".ui.main.settings.behavior.dialog.TextKeyboardLayoutProfilePickerActivity"
             android:theme="@style/Theme.TransparentOverlayActivity" />
+        <activity
+            android:name=".ui.main.settings.behavior.share.QrScanCaptureActivity"
+            android:exported="false"
+            android:screenOrientation="fullSensor"
+            android:stateNotNeeded="true"
+            android:theme="@style/zxing_CaptureTheme"
+            android:windowSoftInputMode="stateAlwaysHidden" />
         <activity
             android:name=".ui.main.settings.behavior.ButtonsCustomizerActivity"
             android:exported="false"
@@ -148,6 +175,28 @@
             </intent-filter>
             <intent-filter>
                 <action android:name="android.intent.action.APPLICATION_PREFERENCES" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+
+                <category android:name="android.intent.category.DEFAULT" />
+
+                <data android:mimeType="*/*" />
+                <data android:mimeType="text/plain" />
+                <data android:mimeType="application/json" />
+                <data android:mimeType="application/zip" />
+                <data android:mimeType="image/*" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+
+                <category android:name="android.intent.category.DEFAULT" />
+
+                <data android:mimeType="*/*" />
+                <data android:mimeType="text/plain" />
+                <data android:mimeType="application/json" />
+                <data android:mimeType="application/zip" />
+                <data android:mimeType="image/*" />
             </intent-filter>
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />

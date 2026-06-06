@@ -16,8 +16,10 @@ import android.graphics.drawable.Drawable
 import android.graphics.drawable.InsetDrawable
 import android.graphics.drawable.RippleDrawable
 import android.graphics.drawable.StateListDrawable
+import android.text.TextPaint
 import android.util.TypedValue
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.View
 import android.widget.ImageView
 import androidx.annotation.ColorInt
@@ -75,6 +77,8 @@ abstract class KeyView(
     val radius: Float
     val hMargin: Int
     val vMargin: Int
+    protected val cornerLabelHorizontalSafeInset: Int
+    protected val cornerLabelTopSafeInset: Int
 
     init {
         val prefs = ThemeManager.prefs
@@ -91,6 +95,8 @@ abstract class KeyView(
         val hMarginValue = (hMarginPref.getValue().toFloat() * hScale).roundToInt().coerceAtLeast(0)
         hMargin = if (def.margin) dp(hMarginValue) else 0
         vMargin = if (def.margin) dp(vMarginPref.getValue()) else 0
+        cornerLabelHorizontalSafeInset = dp(3)
+        cornerLabelTopSafeInset = dp(1)
     }
 
     private val cachedLocation = intArrayOf(0, 0)
@@ -116,6 +122,8 @@ abstract class KeyView(
      */
     @FloatRange(0.0, 1.0)
     var layoutMarginRight = 0f
+
+    var onWaterRippleRequest: ((keyView: KeyView, localX: Float, localY: Float) -> Unit)? = null
 
     /**
      * [KeyView] contains 2 parts: `TouchEventView` and `AppearanceView`.
@@ -232,7 +240,9 @@ abstract class KeyView(
 
     private fun usesSpecialBackground(): Boolean = when (def.viewId) {
         R.id.button_space -> !bordered
-        R.id.button_return, R.id.button_layout_switch -> usesPillShape()
+        // Return keeps accent pill background even when key border is disabled.
+        R.id.button_return -> !bordered || usesPillShape()
+        R.id.button_layout_switch -> usesPillShape()
         else -> false
     }
 
@@ -277,13 +287,17 @@ abstract class KeyView(
     }
 
     private fun setupPressHighlight(mask: Drawable? = null) {
-        appearanceView.foreground = if (rippled) {
-            RippleDrawable(
+        if (rippled) {
+            background = null
+            appearanceView.foreground = RippleDrawable(
                 ColorStateList.valueOf(theme.keyPressHighlightColor), null,
-                // ripple should be masked with an opaque color
                 mask ?: highlightMaskDrawable(Color.WHITE)
             )
-        } else if (bordered && borderStroke && mask == null) {
+            return
+        }
+
+        background = null
+        appearanceView.foreground = if (bordered && borderStroke && mask == null) {
             StateListDrawable().apply {
                 addState(
                     intArrayOf(android.R.attr.state_pressed),
@@ -349,6 +363,13 @@ abstract class KeyView(
         onAppearanceLayoutChanged(appearanceView.width, appearanceView.height)
     }
 
+    override fun onTouchEvent(event: MotionEvent): Boolean {
+        if (event.actionMasked == MotionEvent.ACTION_DOWN && rippled) {
+            onWaterRippleRequest?.invoke(this, event.x, event.y)
+        }
+        return super.onTouchEvent(event)
+    }
+
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         val specialKeyOvalShapeEnabled = ThemeManager.prefs.specialKeyOvalShape.getValue()
         when (def.viewId) {
@@ -372,7 +393,9 @@ abstract class KeyView(
                 )
             }
             R.id.button_return -> {
-                if (specialKeyOvalShapeEnabled && def.border == Border.Special) {
+                // Return uses special pill background when border is disabled,
+                // and also when Gboard-style special key oval shape is enabled.
+                if ((!bordered || specialKeyOvalShapeEnabled) && def.border == Border.Special) {
                     applyPillBackground(theme)
                 }
             }
@@ -526,6 +549,14 @@ class AltTextKeyView(
         )
     }
 
+    private fun applyTopRightAltTextPadding() {
+        altText.setPaddingRelative(0, 0, cornerLabelHorizontalSafeInset, 0)
+    }
+
+    private fun applyBottomAltTextPadding() {
+        altText.setPadding(hMargin, 0, hMargin, 0)
+    }
+
     init {
         appearanceView.apply {
             add(altText, lParams(0, wrapContent))
@@ -556,10 +587,11 @@ class AltTextKeyView(
             width = 0
             bottomToBottom = unset; bottomMargin = 0
             // set
-            topToTop = parentId; topMargin = vMargin
+            topToTop = parentId; topMargin = vMargin + cornerLabelTopSafeInset
             leftToLeft = parentId; leftMargin = hMargin
             rightToRight = parentId; rightMargin = hMargin
         }
+        applyTopRightAltTextPadding()
         altText.gravity = Gravity.END or Gravity.CENTER_VERTICAL
     }
 
@@ -583,6 +615,7 @@ class AltTextKeyView(
             rightToRight = parentId
             bottomToBottom = parentId; bottomMargin = vMargin + dp(2)
         }
+        applyBottomAltTextPadding()
         altText.gravity = Gravity.CENTER
     }
 
@@ -596,6 +629,7 @@ class AltTextKeyView(
             bottomToBottom = parentId
         }
         altText.visibility = View.GONE
+        applyBottomAltTextPadding()
         altText.gravity = Gravity.CENTER
     }
 
@@ -615,16 +649,12 @@ class AltTextKeyView(
         val mainHeight = mainText.paint.run { fontMetrics.bottom - fontMetrics.top }
         val altHeight = altText.paint.run { fontMetrics.bottom - fontMetrics.top }
         // Keep a small guard gap but avoid over-conservative fallback to top-right.
-        val compactMinHeight = max(mainHeight, altHeight + dp(1))
+        val compactMinHeight = max(mainHeight, altHeight + cornerLabelTopSafeInset)
         val stackedMinHeight = mainHeight + altHeight + dp(1)
 
         return when (preferred) {
             AltTextLayoutMode.Bottom -> when {
                 contentHeight >= stackedMinHeight -> AltTextLayoutMode.Bottom
-                // Keep bottom layout in the compact zone if it was already selected.
-                // This prevents top/bottom jitter when measured height fluctuates near threshold.
-                contentHeight >= compactMinHeight && lastLayoutMode == AltTextLayoutMode.Bottom ->
-                    AltTextLayoutMode.Bottom
                 contentHeight >= compactMinHeight -> AltTextLayoutMode.TopRight
                 else -> AltTextLayoutMode.Hidden
             }
@@ -645,6 +675,11 @@ class AltTextKeyView(
             AltTextLayoutMode.TopRight -> applyTopRightAltTextPosition()
             AltTextLayoutMode.Hidden -> applyNoAltTextPosition()
         }
+    }
+
+    fun refreshAltTextLayout() {
+        lastLayoutMode = null
+        applyLayout()
     }
 
     override fun shouldTriggerAltBySwipe(totalY: Int, fallback: SwipeSymbolDirection): Boolean {
@@ -696,7 +731,19 @@ class ImageAltTextKeyView(
     private val baseAltTextSizeSp = org.fcitx.fcitx5.android.input.font.FontProviders.getFontSize(
         "key_alt_font", 10.666667f
     )
+    private var currentMainTextScale = 1f
     private var lastLayoutMode: AltTextLayoutMode? = null
+
+    // Reused for measuring main-text height in resolveLayoutMode().
+    // Configured lazily and re-used across calls to avoid per-swipe Skia paint allocation.
+    private val mainTextMeasurePaint = TextPaint()
+    private var cachedMainTextHeight = -1f
+    private var cachedAltTextHeight = -1f
+
+    private fun invalidateTextMetricsCache() {
+        cachedMainTextHeight = -1f
+        cachedAltTextHeight = -1f
+    }
 
     val img = imageView { configure(theme, def.src, def.variant) }.apply {
         imageTintList = ColorStateList.valueOf(
@@ -731,6 +778,14 @@ class ImageAltTextKeyView(
         )
     }
 
+    private fun applyTopRightAltTextPadding() {
+        altText.setPaddingRelative(0, 0, cornerLabelHorizontalSafeInset, 0)
+    }
+
+    private fun applyBottomAltTextPadding() {
+        altText.setPadding(hMargin, 0, hMargin, 0)
+    }
+
     init {
         appearanceView.apply {
             add(img, lParams(wrapContent, wrapContent))
@@ -740,8 +795,10 @@ class ImageAltTextKeyView(
     }
 
     override fun setTextScale(scale: Float) {
+        currentMainTextScale = scale
         altText.setTextSize(TypedValue.COMPLEX_UNIT_SP, baseAltTextSizeSp * scale)
         altText.requestLayout()
+        invalidateTextMetricsCache()
         lastLayoutMode = null
         applyLayout()
     }
@@ -759,11 +816,12 @@ class ImageAltTextKeyView(
         altText.visibility = View.VISIBLE
         altText.updateLayoutParams<ConstraintLayout.LayoutParams> {
             width = 0
-            topToTop = parentId; topMargin = vMargin
+            topToTop = parentId; topMargin = vMargin + cornerLabelTopSafeInset
             bottomToBottom = unset; bottomMargin = 0
             leftToLeft = parentId; leftMargin = hMargin
             rightToRight = parentId; rightMargin = hMargin
         }
+        applyTopRightAltTextPadding()
         altText.gravity = Gravity.END or Gravity.CENTER_VERTICAL
     }
 
@@ -783,6 +841,7 @@ class ImageAltTextKeyView(
             rightToRight = parentId; rightMargin = hMargin
             bottomToBottom = parentId; bottomMargin = vMargin + dp(2)
         }
+        applyBottomAltTextPadding()
         altText.gravity = Gravity.CENTER
     }
 
@@ -797,6 +856,7 @@ class ImageAltTextKeyView(
             bottomToTop = unset
         }
         altText.visibility = View.GONE
+        applyBottomAltTextPadding()
         altText.gravity = Gravity.CENTER
     }
 
@@ -813,16 +873,37 @@ class ImageAltTextKeyView(
         if (keyHeight <= 0) return preferred
 
         val contentHeight = keyHeight - vMargin * 2
-        val iconHeight = img.measuredHeight.takeIf { it > 0 } ?: dp(24)
-        val altHeight = altText.paint.run { fontMetrics.bottom - fontMetrics.top }
-        val compactMinHeight = max(iconHeight.toFloat(), altHeight + dp(1).toFloat())
-        val stackedMinHeight = iconHeight + altHeight + dp(1)
+        val measuredIconHeight = img.measuredHeight.takeIf { it > 0 } ?: 0
+        val drawableIconHeight = img.drawable?.intrinsicHeight?.takeIf { it > 0 } ?: dp(24)
+        val iconHeight = max(measuredIconHeight, drawableIconHeight).toFloat()
+        val mainHeight = cachedMainTextHeight.takeIf { it >= 0f } ?: run {
+            val mainTextSizeSp = org.fcitx.fcitx5.android.input.font.FontProviders.getFontSize(
+                "key_main_font",
+                23f
+            ) * currentMainTextScale
+            mainTextMeasurePaint.textSize = TypedValue.applyDimension(
+                TypedValue.COMPLEX_UNIT_SP,
+                mainTextSizeSp,
+                resources.displayMetrics
+            )
+            mainTextMeasurePaint.typeface = org.fcitx.fcitx5.android.input.font.FontProviders
+                .resolveTypeface("key_main_font", Typeface.DEFAULT)
+            val h = mainTextMeasurePaint.run { fontMetrics.bottom - fontMetrics.top }
+            cachedMainTextHeight = h
+            h
+        }
+        val altHeight = cachedAltTextHeight.takeIf { it >= 0f } ?: run {
+            val h = altText.paint.run { fontMetrics.bottom - fontMetrics.top }
+            cachedAltTextHeight = h
+            h
+        }
+        val normalizedMainHeight = max(iconHeight, mainHeight)
+        val compactMinHeight = max(normalizedMainHeight, altHeight + cornerLabelTopSafeInset)
+        val stackedMinHeight = normalizedMainHeight + altHeight + dp(1)
 
         return when (preferred) {
             AltTextLayoutMode.Bottom -> when {
                 contentHeight >= stackedMinHeight -> AltTextLayoutMode.Bottom
-                contentHeight >= compactMinHeight && lastLayoutMode == AltTextLayoutMode.Bottom ->
-                    AltTextLayoutMode.Bottom
                 contentHeight >= compactMinHeight -> AltTextLayoutMode.TopRight
                 else -> AltTextLayoutMode.Hidden
             }
@@ -845,6 +926,11 @@ class ImageAltTextKeyView(
         }
     }
 
+    fun refreshAltTextLayout() {
+        lastLayoutMode = null
+        applyLayout()
+    }
+
     override fun shouldTriggerAltBySwipe(totalY: Int, fallback: SwipeSymbolDirection): Boolean {
         if (totalY == 0) return false
         return when (lastLayoutMode ?: resolveLayoutMode(appearanceView.height)) {
@@ -855,6 +941,7 @@ class ImageAltTextKeyView(
     }
 
     override fun onConfigurationChanged(newConfig: Configuration) {
+        invalidateTextMetricsCache()
         lastLayoutMode = null
         applyLayout()
     }

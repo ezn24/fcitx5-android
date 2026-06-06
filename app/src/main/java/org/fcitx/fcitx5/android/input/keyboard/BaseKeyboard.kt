@@ -17,6 +17,7 @@ import androidx.annotation.Keep
 import androidx.annotation.DrawableRes
 import androidx.constraintlayout.widget.ConstraintLayout
 import androidx.constraintlayout.widget.Guideline
+import androidx.core.graphics.ColorUtils
 import androidx.core.view.allViews
 import androidx.core.view.children
 import androidx.core.view.updateLayoutParams
@@ -61,8 +62,10 @@ import splitties.views.dsl.constraintlayout.rightOfParent
 import splitties.views.dsl.constraintlayout.rightToLeftOf
 import splitties.views.dsl.constraintlayout.topOfParent
 import splitties.views.dsl.core.add
+import splitties.views.dsl.core.matchParent
 import timber.log.Timber
 import kotlin.math.absoluteValue
+import kotlin.math.max
 import kotlin.math.roundToInt
 
 abstract class BaseKeyboard(
@@ -106,7 +109,11 @@ abstract class BaseKeyboard(
     private val disabledSwipeThreshold = dp(800f)
 
     private val bounds = Rect()
+    private val childLocationInWindow = intArrayOf(0, 0)
     private lateinit var keyRows: List<ConstraintLayout>
+    private var keyboardWaterRippleView: KeyboardWaterRippleView? = null
+    private var cachedWaterRippleColor: Int? = null
+    private var rowHeightPercents: List<Float> = emptyList()
     private var horizontalGapScale = 1f
     private var composing = false
 
@@ -154,6 +161,8 @@ abstract class BaseKeyboard(
 
     init {
         isMotionEventSplittingEnabled = true
+        clipChildren = false
+        clipToPadding = false
         reloadLayout()
         spaceSwipeMoveCursor.registerOnChangeListener(spaceSwipeChangeListener)
         splitKeyboardManager.registerListener(splitStateChangeListener)
@@ -161,13 +170,20 @@ abstract class BaseKeyboard(
 
     protected open fun reloadLayout() {
         removeAllViews()
+        cachedWaterRippleColor = null
+        keyboardWaterRippleView = KeyboardWaterRippleView(context).also { rippleView ->
+            add(rippleView, lParams(matchParent, matchParent))
+        }
         spaceKeys.clear()
         touchTarget.clear()
         composeAwareKeys.clear()
 
         val splitKeyboard = splitKeyboardManager.shouldUseSplitKeyboard(width)
         lastSplitLandscapeState = splitKeyboard
-        keyRows = keyLayout.map { row ->
+        val rows = keyLayout
+        rowHeightPercents = resolveRowHeightPercents(rows)
+
+        keyRows = rows.map { row ->
             val keyViews = row.map(::createKeyView).apply {
                 // Batch apply fontset mappings for all key labels.
                 forEach(::applyConfiguredFonts)
@@ -180,6 +196,8 @@ abstract class BaseKeyboard(
         }
         keyRows.forEachIndexed { index, row ->
             add(row, lParams {
+                height = 0
+                verticalWeight = rowHeightPercents.getOrElse(index) { 1f }
                 if (index == 0) topOfParent()
                 else below(keyRows[index - 1])
                 if (index == keyRows.size - 1) bottomOfParent()
@@ -187,7 +205,51 @@ abstract class BaseKeyboard(
                 centerHorizontally()
             })
         }
+
+        keyboardWaterRippleView?.setOccluders(
+            keyRows.flatMap { row -> row.children.mapNotNull { it as? KeyView }.toList() }
+        )
     }
+
+    private fun resolveRowHeightPercents(rows: List<List<KeyDef>>): List<Float> {
+        if (rows.isEmpty()) return emptyList()
+
+        val parsedPercents = rows.map { row ->
+            row.mapNotNull { it.rowHeightPercent }
+                .maxOrNull()
+                ?.takeIf { it in 1f..100f }
+        }
+        val definedSum = parsedPercents.filterNotNull().sum()
+        val undefinedCount = parsedPercents.count { it == null }
+
+        val distributed = if (undefinedCount == 0) {
+            parsedPercents.map { it ?: 0f }
+        } else {
+            val remaining = (100f - definedSum).coerceAtLeast(0f)
+            val avg = remaining / undefinedCount
+            parsedPercents.map { it ?: avg }
+        }
+
+        val sum = distributed.sum()
+        if (sum <= 0f) {
+            val fallback = defaultRowHeightPercent(rows.size)
+            return List(rows.size) { fallback }
+        }
+
+        return distributed.map { it * 100f / sum }
+    }
+
+    protected open fun defaultRowHeightPercent(rowCount: Int): Float {
+        if (rowCount <= 0) return 25f
+        return (100f / rowCount.toFloat()).coerceAtLeast(1f)
+    }
+
+    open fun keyboardHeightScaleFactor(): Float {
+        if (rowHeightPercents.isEmpty()) return 1f
+        return (rowHeightPercents.sum() / 100f).coerceAtLeast(0.1f)
+    }
+
+    open fun preferredKeyboardHeightPercentOverride(): Int? = null
 
     private fun splitGapPercent(): Float {
         return splitKeyboardManager.getSplitGapPercent()
@@ -230,22 +292,26 @@ abstract class BaseKeyboard(
             }
         }
 
-        val spaceIndex = row.indexOfFirst { it is SpaceKey || it is MiniSpaceKey }
-        if (spaceIndex in 1 until row.lastIndex) {
-            val aroundSpaceCandidates = listOf(spaceIndex - 1, spaceIndex)
-                .filter { it in 0 until row.lastIndex }
+        val spaceIndices = row.mapIndexedNotNull { index, def ->
+            if (def is SpaceKey || def is MiniSpaceKey) index else null
+        }.filter { it in 1 until row.lastIndex }
+        if (spaceIndices.isNotEmpty()) {
             var running = 0f
             val prefixByBoundary = HashMap<Int, Float>(row.size)
             for (i in 0 until row.lastIndex) {
                 running += normalizedWidths[i]
                 prefixByBoundary[i] = running
             }
-            aroundSpaceCandidates.forEach { index ->
-                val p = prefixByBoundary[index] ?: return@forEach
-                val d = kotlin.math.abs(p - 0.5f)
-                if (d <= bestDistance + 0.06f) {
-                    bestDistance = d
-                    bestIndex = index
+            spaceIndices.forEach { spaceIndex ->
+                val aroundSpaceCandidates = listOf(spaceIndex - 1, spaceIndex)
+                    .filter { it in 0 until row.lastIndex }
+                aroundSpaceCandidates.forEach { index ->
+                    val p = prefixByBoundary[index] ?: return@forEach
+                    val d = kotlin.math.abs(p - 0.5f)
+                    if (d <= bestDistance + 0.06f) {
+                        bestDistance = d
+                        bestIndex = index
+                    }
                 }
             }
         }
@@ -253,12 +319,23 @@ abstract class BaseKeyboard(
     }
 
     private fun buildSplitRow(row: List<KeyDef>, keyViews: List<KeyView>): ConstraintLayout = constraintLayout {
+        clipChildren = false
+        clipToPadding = false
+        keyViews.forEach { keyView ->
+            keyView.onWaterRippleRequest = { view, _, _ ->
+                val cx = (view.parent as? View)?.x.orZero() + view.x + view.width * 0.5f
+                val cy = (view.parent as? View)?.y.orZero() + view.y + view.height * 0.5f
+                val radius = waterRippleRadiusPx(view)
+                keyboardWaterRippleView?.startRipple(cx, cy, waterRippleColor(), radius)
+            }
+        }
         if (row.isEmpty()) return@constraintLayout
         val gap = splitGapPercent()
         val normalizedWidths = resolveRowWidths(row)
 
+        val flexCount = row.count { it.appearance.percentWidth <= 0f }
         val bridgeIndex = row.indexOfFirst { it is SpaceKey || it is MiniSpaceKey }
-            .takeIf { it in 1 until row.lastIndex }
+            .takeIf { it in 1 until row.lastIndex && flexCount <= 1 }
         if (bridgeIndex != null) {
             val minSideReach = 0.06f
             val bridgeMinWidth = (gap + minSideReach * 2f).coerceAtMost(0.75f)
@@ -455,6 +532,16 @@ abstract class BaseKeyboard(
     }
 
     private fun buildRegularRow(row: List<KeyDef>, keyViews: List<KeyView>): ConstraintLayout = constraintLayout Row@{
+        clipChildren = false
+        clipToPadding = false
+        keyViews.forEach { keyView ->
+            keyView.onWaterRippleRequest = { view, _, _ ->
+                val cx = (view.parent as? View)?.x.orZero() + view.x + view.width * 0.5f
+                val cy = (view.parent as? View)?.y.orZero() + view.y + view.height * 0.5f
+                val radius = waterRippleRadiusPx(view)
+                keyboardWaterRippleView?.startRipple(cx, cy, waterRippleColor(), radius)
+            }
+        }
         var totalWidth = 0f
         keyViews.forEachIndexed { index, view ->
             add(view, lParams {
@@ -495,6 +582,32 @@ abstract class BaseKeyboard(
                 layoutMarginRight = free / (row.last().appearance.percentWidth + free)
             }
         }
+    }
+
+    private fun Float?.orZero(): Float = this ?: 0f
+
+    private fun waterRippleRadiusPx(view: View): Float {
+        val base = minOf(width, height).takeIf { it > 0 }?.toFloat() ?: dp(120).toFloat()
+        val minFromKey = max(view.width, view.height) * 1.0f
+        return max(base * 0.20f, minFromKey)
+    }
+
+    private fun waterRippleColor(): Int {
+        cachedWaterRippleColor?.let { return it }
+        theme.waterRippleColor?.let {
+            cachedWaterRippleColor = it
+            return it
+        }
+        val shadow = theme.keyShadowColor
+        val background = ColorUtils.setAlphaComponent(theme.keyboardColor, 255)
+        val contrast = ColorUtils.calculateContrast(shadow, background)
+        val computed = if (contrast < 1.35) {
+            ColorUtils.blendARGB(shadow, theme.accentKeyBackgroundColor, 0.72f)
+        } else {
+            ColorUtils.blendARGB(shadow, theme.accentKeyBackgroundColor, 0.28f)
+        }
+        cachedWaterRippleColor = computed
+        return computed
     }
 
     private var currentTextScale = 1.0f
@@ -552,6 +665,7 @@ abstract class BaseKeyboard(
      */
     fun updateTheme(newTheme: Theme) {
         theme = newTheme
+        cachedWaterRippleColor = null
 
         if (::keyRows.isInitialized) {
             keyRows.forEach { row ->
@@ -740,6 +854,10 @@ abstract class BaseKeyboard(
             } finally {
                 parents.forEach { it.suppressLayout(false) }
             }
+            // Update occluders so water ripple masking uses the recreated views
+            keyboardWaterRippleView?.setOccluders(
+                keyRows.flatMap { row -> row.children.mapNotNull { it as? KeyView }.toList() }
+            )
         }
 
         updates.forEach { u ->
@@ -815,6 +933,13 @@ abstract class BaseKeyboard(
         // Keep the same identity so sibling constraints (leftToRight/rightToLeft) remain valid.
         newView.id = oldView.id
         newView.tag = oldView.tag
+        // Preserve water ripple request callback on recreated view
+        newView.onWaterRippleRequest = { view, _, _ ->
+            val cx = (view.parent as? View)?.x.orZero() + view.x + view.width * 0.5f
+            val cy = (view.parent as? View)?.y.orZero() + view.y + view.height * 0.5f
+            val radius = waterRippleRadiusPx(view)
+            keyboardWaterRippleView?.startRipple(cx, cy, waterRippleColor(), radius)
+        }
         parent.removeViewAt(index)
         if (copiedLayoutParams != null) {
             parent.addView(newView, index, copiedLayoutParams)
@@ -851,8 +976,73 @@ abstract class BaseKeyboard(
             overrideDef.appearance.withIdentityFrom(baseDef.appearance)
         } else {
             overrideDef.appearance.withColorsFrom(baseDef.appearance)
-        }
+        }.withTextMetricsFrom(baseDef.appearance)
         return overrideDef to appearance
+    }
+
+    private fun KeyDef.Appearance.withTextMetricsFrom(source: KeyDef.Appearance): KeyDef.Appearance {
+        val sourceText = source as? KeyDef.Appearance.Text ?: return this
+        return when (this) {
+            is KeyDef.Appearance.AltText -> KeyDef.Appearance.AltText(
+                displayText = displayText,
+                altText = altText,
+                character = character,
+                textSize = sourceText.textSize,
+                textStyle = sourceText.textStyle,
+                percentWidth = percentWidth,
+                variant = variant,
+                border = border,
+                margin = margin,
+                viewId = viewId,
+                textColor = textColor,
+                textColorMonet = textColorMonet,
+                altTextColor = altTextColor,
+                altTextColorMonet = altTextColorMonet,
+                backgroundColor = backgroundColor,
+                backgroundColorMonet = backgroundColorMonet,
+                shadowColor = shadowColor,
+                shadowColorMonet = shadowColorMonet
+            )
+            is KeyDef.Appearance.ImageText -> KeyDef.Appearance.ImageText(
+                displayText = displayText,
+                textSize = sourceText.textSize,
+                textStyle = sourceText.textStyle,
+                src = src,
+                percentWidth = percentWidth,
+                variant = variant,
+                border = border,
+                margin = margin,
+                viewId = viewId,
+                textColor = textColor,
+                textColorMonet = textColorMonet,
+                altTextColor = altTextColor,
+                altTextColorMonet = altTextColorMonet,
+                backgroundColor = backgroundColor,
+                backgroundColorMonet = backgroundColorMonet,
+                shadowColor = shadowColor,
+                shadowColorMonet = shadowColorMonet
+            )
+            is KeyDef.Appearance.Text -> KeyDef.Appearance.Text(
+                displayText = displayText,
+                textSize = sourceText.textSize,
+                textStyle = sourceText.textStyle,
+                percentWidth = percentWidth,
+                variant = variant,
+                border = border,
+                margin = margin,
+                viewId = viewId,
+                soundEffect = soundEffect,
+                textColor = textColor,
+                textColorMonet = textColorMonet,
+                altTextColor = altTextColor,
+                altTextColorMonet = altTextColorMonet,
+                backgroundColor = backgroundColor,
+                backgroundColorMonet = backgroundColorMonet,
+                shadowColor = shadowColor,
+                shadowColorMonet = shadowColorMonet
+            )
+            else -> this
+        }
     }
 
     private fun KeyDef.Appearance.withIdentityFrom(source: KeyDef.Appearance): KeyDef.Appearance = when (this) {
@@ -1052,10 +1242,12 @@ abstract class BaseKeyboard(
             is AltTextKeyView -> if (appearance is KeyDef.Appearance.AltText) {
                 view.mainText.text = appearance.displayText
                 view.altText.text = appearance.altText
+                view.refreshAltTextLayout()
             }
             is ImageAltTextKeyView -> if (appearance is KeyDef.Appearance.ImageAltText) {
                 view.img.setImageResource(appearance.src)
                 view.altText.text = appearance.altText
+                view.refreshAltTextLayout()
             }
             is ImageTextKeyView -> if (appearance is KeyDef.Appearance.ImageText) {
                 view.mainText.text = appearance.displayText
@@ -1087,6 +1279,11 @@ abstract class BaseKeyboard(
         view.swipeThresholdX = baseline.swipeThresholdX
         view.swipeThresholdY = baseline.swipeThresholdY
         view.onGestureListener = baseline.onGestureListener
+
+        val interactive = behaviors.isNotEmpty() || !popup.isNullOrEmpty()
+        view.isEnabled = interactive
+        view.isClickable = interactive
+        if (!interactive) return
 
         var hasLongPressBehavior = false
         behaviors.forEach {
@@ -1144,6 +1341,7 @@ abstract class BaseKeyboard(
                     if (!hasLongPressKeyboard && !hasLongPressBehavior) {
                         view.setOnLongClickListener { currentView ->
                             currentView as KeyView
+                            dismissAllPopups()
                             onPopupAction(PopupAction.ShowMenuAction(currentView.id, it, currentView.bounds))
                             false
                         }
@@ -1166,6 +1364,7 @@ abstract class BaseKeyboard(
                 is KeyDef.Popup.LongPressKeyboard -> {
                     view.setOnLongClickListener { currentView ->
                         currentView as KeyView
+                        dismissAllPopups()
                         onPopupAction(PopupAction.ShowLongPressKeyboardAction(currentView.id, it, currentView.bounds))
                         false
                     }
@@ -1188,6 +1387,7 @@ abstract class BaseKeyboard(
                     if (!hasLongPressKeyboard && !hasLongPressBehavior) {
                         view.setOnLongClickListener { currentView ->
                             currentView as KeyView
+                            dismissAllPopups()
                             onPopupAction(PopupAction.ShowKeyboardAction(currentView.id, it, currentView.bounds))
                             false
                         }
@@ -1225,6 +1425,7 @@ abstract class BaseKeyboard(
                                 }
                                 GestureType.Up -> {
                                     onPopupAction(PopupAction.DismissAction(currentView.id))
+                                    dismissAllPopups()
                                 }
                             }
                         }
@@ -1242,6 +1443,7 @@ abstract class BaseKeyboard(
                                 )
                                 GestureType.Up -> {
                                     onPopupAction(PopupAction.DismissAction(currentView.id))
+                                    dismissAllPopups()
                                 }
                                 else -> {}
                             }
@@ -1306,11 +1508,11 @@ abstract class BaseKeyboard(
     }
 
     private fun findTargetChild(x: Float, y: Float): View? {
-        val y0 = y.roundToInt()
+        updateBounds()
         val x1 = x.roundToInt() + bounds.left
-        val y1 = y0 + bounds.top
+        val y1 = y.roundToInt() + bounds.top
         return keyRows.asSequence().flatMap { it.children }.find {
-            if (it !is KeyView) false else it.bounds.contains(x1, y1)
+            if (it !is KeyView) false else it.isEnabled && it.bounds.contains(x1, y1)
         }
     }
 
@@ -1324,8 +1526,9 @@ abstract class BaseKeyboard(
             Timber.w("child view is not KeyView when transforming MotionEvent $event")
             return event
         }
-        val childX = event.getX(pointerIndex) + bounds.left - child.bounds.left
-        val childY = event.getY(pointerIndex) + bounds.top - child.bounds.top
+        val (childWindowX, childWindowY) = childLocationInWindow.also { child.getLocationInWindow(it) }
+        val childX = event.getX(pointerIndex) + bounds.left - childWindowX
+        val childY = event.getY(pointerIndex) + bounds.top - childWindowY
         return MotionEvent.obtain(
             event.downTime, event.eventTime, action,
             childX, childY, event.getPressure(pointerIndex), event.getSize(pointerIndex),
@@ -1493,7 +1696,38 @@ abstract class BaseKeyboard(
                         Timber.v("executeMacro: Shortcut modifiers=%d key=%s", step.modifiers.size, step.key)
                         executeShortcut(step.modifiers, step.key)
                     }
+                    is MacroStep.LayerSwitch -> {
+                        Timber.v("executeMacro: %s target=%s", step.mode, step.target)
+                        keyActionListener?.onKeyAction(
+                            KeyAction.LayerSwitchAction(
+                                step.mode,
+                                step.target
+                            ),
+                            KeyActionListener.Source.Keyboard
+                        )
+                    }
                 }
+            }
+            if (macroAction.hasOneShotLayerConsumingStep()) {
+                keyActionListener?.onKeyAction(
+                    KeyAction.MacroConsumedAction,
+                    KeyActionListener.Source.Keyboard
+                )
+            }
+        }
+    }
+
+    private fun MacroAction.hasOneShotLayerConsumingStep(): Boolean {
+        return steps.any { step ->
+            when (step) {
+                is MacroStep.Down -> step.keys.isNotEmpty()
+                is MacroStep.Up -> step.keys.isNotEmpty()
+                is MacroStep.Tap -> step.keys.isNotEmpty()
+                is MacroStep.Text -> step.text.isNotEmpty()
+                is MacroStep.Edit -> step.action.isNotBlank()
+                is MacroStep.AppAction -> step.id.isNotBlank()
+                is MacroStep.Shortcut -> true
+                is MacroStep.LayerSwitch -> false
             }
         }
     }
@@ -2026,7 +2260,16 @@ abstract class BaseKeyboard(
 
     @CallSuper
     protected open fun onPopupAction(action: PopupAction) {
+        if (action is PopupAction.PreviewAction || action is PopupAction.ShowKeyboardAction ||
+            action is PopupAction.ShowLongPressKeyboardAction || action is PopupAction.ShowMenuAction
+        ) {
+            dismissAllPopups()
+        }
         popupActionListener?.onPopupAction(action)
+    }
+
+    private fun dismissAllPopups() {
+        popupActionListener?.onPopupAction(PopupAction.DismissAllAction())
     }
 
     private fun onPopupChangeFocus(viewId: Int, x: Float, y: Float): Boolean {

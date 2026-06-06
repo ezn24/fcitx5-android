@@ -47,6 +47,7 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.updateLayoutParams
 import androidx.lifecycle.lifecycleScope
+import androidx.core.graphics.ColorUtils
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.parcelize.Parcelize
@@ -149,6 +150,7 @@ class CustomThemeActivity : AppCompatActivity() {
         ThemeColorEditItem("Candidate Comment", { t: Theme.Custom -> t.candidateCommentColor }, { t: Theme.Custom, c: Int -> t.copy(candidateCommentColor = c) }),
         ThemeColorEditItem("Key Press Highlight", { t: Theme.Custom -> t.keyPressHighlightColor }, { t: Theme.Custom, c: Int -> t.copy(keyPressHighlightColor = c) }),
         ThemeColorEditItem("Key Shadow", { t: Theme.Custom -> t.keyShadowColor }, { t: Theme.Custom, c: Int -> t.copy(keyShadowColor = c) }),
+        ThemeColorEditItem("Water Ripple", { t: Theme.Custom -> t.waterRippleColor ?: computeWaterRippleColor(t) }, { t: Theme.Custom, c: Int -> t.copy(waterRippleColor = c) }),
         ThemeColorEditItem("Popup Background", { t: Theme.Custom -> t.popupBackgroundColor }, { t: Theme.Custom, c: Int -> t.copy(popupBackgroundColor = c) }),
         ThemeColorEditItem("Popup Text", { t: Theme.Custom -> t.popupTextColor }, { t: Theme.Custom, c: Int -> t.copy(popupTextColor = c) }),
         ThemeColorEditItem("Space Bar", { t: Theme.Custom -> t.spaceBarColor }, { t: Theme.Custom, c: Int -> t.copy(spaceBarColor = c) }),
@@ -161,13 +163,34 @@ class CustomThemeActivity : AppCompatActivity() {
         registerForActivityResult(ThemeColorEditorActivity.Contract()) { result ->
             result ?: return@registerForActivityResult
             val item = colorEditItems.firstOrNull { it.name == result.fieldName } ?: return@registerForActivityResult
+            if (result.color == null) {
+                if (item.name == "Water Ripple") {
+                    theme = theme.copy(waterRippleColor = null)
+                    colorPreviewDrawables[item.name]?.setColor(computeWaterRippleColor(theme))
+                    applyThemePreview(theme)
+                    refreshSaveButtonState()
+                }
+                return@registerForActivityResult
+            }
             val originalTheme = theme
             val originalColor = item.getter(originalTheme)
             if (result.color == originalColor) return@registerForActivityResult
             theme = item.setter(originalTheme, result.color)
             colorPreviewDrawables[item.name]?.setColor(result.color)
             applyThemePreview(theme)
+            refreshSaveButtonState()
         }
+
+    private fun computeWaterRippleColor(theme: Theme.Custom): Int {
+        val shadow = theme.keyShadowColor
+        val background = ColorUtils.setAlphaComponent(theme.keyboardColor, 255)
+        val contrast = ColorUtils.calculateContrast(shadow, background)
+        return if (contrast < 1.35) {
+            ColorUtils.blendARGB(shadow, theme.accentKeyBackgroundColor, 0.72f)
+        } else {
+            ColorUtils.blendARGB(shadow, theme.accentKeyBackgroundColor, 0.28f)
+        }
+    }
 
     private fun createTextView(@StringRes string: Int? = null, ripple: Boolean = false) = textView {
         if (string != null) {
@@ -212,6 +235,7 @@ class CustomThemeActivity : AppCompatActivity() {
                 theme = theme.copy(name = newName)
                 supportActionBar?.title = toThemeLabel(newName)
                 applyThemePreview(theme)
+                refreshSaveButtonState()
                 dialog.dismiss()
             }
         }
@@ -247,6 +271,8 @@ class CustomThemeActivity : AppCompatActivity() {
             null
         }
     }
+
+    private fun GradientDrawable.previewColorOrNull(): Int? = color?.defaultColor
 
     private fun currentBackgroundDrawable(themeForBackground: Theme.Custom): BitmapDrawable? {
         return if (themeForBackground.backgroundImage != null)
@@ -357,8 +383,10 @@ class CustomThemeActivity : AppCompatActivity() {
 
     private fun createInlineColorEditor(
         initialColor: Int,
+        allowClear: Boolean = false,
         onPreview: (Int) -> Unit,
         onConfirm: (Int) -> Unit,
+        onClear: (() -> Unit)? = null,
         onCancel: () -> Unit
     ): View {
         var editingColor = initialColor
@@ -537,6 +565,21 @@ class CustomThemeActivity : AppCompatActivity() {
                     layoutParams = LinearLayout.LayoutParams(dp(16), 1)
                 })
 
+                if (allowClear) {
+                    addView(Button(this@CustomThemeActivity).apply {
+                        text = getString(R.string.clear)
+                        layoutParams = LinearLayout.LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f)
+                        setOnClickListener {
+                            onClear?.invoke()
+                            removeEditorView()
+                        }
+                    })
+
+                    addView(View(this@CustomThemeActivity).apply {
+                        layoutParams = LinearLayout.LayoutParams(dp(16), 1)
+                    })
+                }
+
                 addView(Button(this@CustomThemeActivity).apply {
                     text = getString(R.string.custom_theme_cancel)
                     layoutParams = LinearLayout.LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f)
@@ -684,12 +727,14 @@ class CustomThemeActivity : AppCompatActivity() {
                 label.setCompoundDrawablesWithIntrinsicBounds(null, null, preview, null)
                 label.compoundDrawablePadding = dp(12)
                 label.setOnClickListener {
+                    val displayedColor = preview.previewColorOrNull() ?: item.getter(theme)
                     if (DeviceUtil.isHMOS) {
                         colorEditorLauncher.launch(
                             ThemeColorEditorActivity.EditorInput(
                                 fieldName = item.name,
                                 titleRes = R.string.edit_color,
-                                initialColor = item.getter(theme)
+                                initialColor = displayedColor,
+                                allowClear = item.name == "Water Ripple"
                             )
                         )
                         return@setOnClickListener
@@ -715,9 +760,10 @@ class CustomThemeActivity : AppCompatActivity() {
                     }
 
                     val originalTheme = theme
-                    val originalColor = item.getter(originalTheme)
+                    val originalColor = displayedColor
                     val editor = createInlineColorEditor(
                         initialColor = originalColor,
+                        allowClear = item.name == "Water Ripple",
                         onPreview = { c ->
                             val changed = c != originalColor
                             if (changed) {
@@ -734,7 +780,15 @@ class CustomThemeActivity : AppCompatActivity() {
                                 theme = item.setter(originalTheme, c)
                                 preview.setColor(c)
                                 applyThemePreview(theme)
+                                refreshSaveButtonState()
                             }
+                            inlinePreviewDirty = false
+                        },
+                        onClear = {
+                            theme = theme.copy(waterRippleColor = null)
+                            preview.setColor(computeWaterRippleColor(theme))
+                            applyThemePreview(theme)
+                            refreshSaveButtonState()
                             inlinePreviewDirty = false
                         },
                         onCancel = {
@@ -845,8 +899,36 @@ class CustomThemeActivity : AppCompatActivity() {
     private var newCreated = true
 
     private lateinit var theme: Theme.Custom
+    private lateinit var initialThemeSnapshot: Theme.Custom
     private var originalThemeName: String? = null
     private var backgroundControlsBound = false
+    private var suppressVariantSwitchCallback = false
+    private var saveMenuItem: MenuItem? = null
+
+    private fun effectiveThemeForDirtyCheck(): Theme.Custom {
+        val bg = theme.backgroundImage ?: return theme
+        return theme.copy(
+            backgroundImage = bg.copy(
+                brightness = brightnessSeekBar.progress,
+                blurRadius = blurRadiusSeekBar.progress.toFloat(),
+                cropRect = backgroundStates.cropRect,
+                cropRotation = backgroundStates.cropRotation
+            )
+        )
+    }
+
+    private fun hasUnsavedChanges(): Boolean {
+        if (newCreated) return true
+        if (!::initialThemeSnapshot.isInitialized) return false
+        if (backgroundStates.srcImageDirty || backgroundStates.pendingSrcUri != null) return true
+        return effectiveThemeForDirtyCheck() != initialThemeSnapshot
+    }
+
+    private fun refreshSaveButtonState() {
+        val enabled = hasUnsavedChanges()
+        saveMenuItem?.isEnabled = enabled
+        saveMenuItem?.icon?.alpha = if (enabled) 255 else 90
+    }
 
     private class BackgroundStates {
         lateinit var launcher: ActivityResultLauncher<CropOption>
@@ -890,6 +972,7 @@ class CustomThemeActivity : AppCompatActivity() {
             background.cropRotation
         )
         applyThemePreview(theme, filteredDrawable)
+        refreshSaveButtonState()
     }
 
     /**
@@ -981,6 +1064,7 @@ class CustomThemeActivity : AppCompatActivity() {
                     updateBackgroundEditorVisibility()
                     updateBlurRadiusLabel(blurRadiusSeekBar.progress)
                     backgroundStates.updateState()
+                    refreshSaveButtonState()
                 }
             }
         }
@@ -1025,6 +1109,7 @@ class CustomThemeActivity : AppCompatActivity() {
             variantSwitch.isChecked = !variantSwitch.isChecked
         }
         variantSwitch.setOnCheckedChangeListener { _, isChecked ->
+            if (suppressVariantSwitchCallback) return@setOnCheckedChangeListener
             whenHasBackground { background ->
                 setKeyVariant(background, darkKeys = isChecked)
             }
@@ -1035,6 +1120,7 @@ class CustomThemeActivity : AppCompatActivity() {
             override fun onProgressChanged(bar: SeekBar, progress: Int, fromUser: Boolean) {
                 if (fromUser && theme.backgroundImage != null) {
                     backgroundStates.updateState()
+                    refreshSaveButtonState()
                 }
             }
         })
@@ -1045,6 +1131,7 @@ class CustomThemeActivity : AppCompatActivity() {
                 updateBlurRadiusLabel(progress)
                 if (fromUser && theme.backgroundImage != null) {
                     backgroundStates.updateState()
+                    refreshSaveButtonState()
                 }
             }
         })
@@ -1060,6 +1147,7 @@ class CustomThemeActivity : AppCompatActivity() {
         backgroundStates.pendingSrcFile = null
         applyThemePreview(theme)
         updateBackgroundEditorVisibility()
+        refreshSaveButtonState()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -1116,7 +1204,9 @@ class CustomThemeActivity : AppCompatActivity() {
         whenHasBackground { background ->
             brightnessSeekBar.progress = background.brightness
             blurRadiusSeekBar.progress = background.blurRadius.toInt()
+            suppressVariantSwitchCallback = true
             variantSwitch.isChecked = !theme.isDark
+            suppressVariantSwitchCallback = false
             updateBlurRadiusLabel(blurRadiusSeekBar.progress)
         }
         updateBackgroundEditorVisibility()
@@ -1135,6 +1225,9 @@ class CustomThemeActivity : AppCompatActivity() {
         onBackPressedDispatcher.addCallback {
             cancel()
         }
+
+        initialThemeSnapshot = effectiveThemeForDirtyCheck()
+        refreshSaveButtonState()
     }
 
     private fun BackgroundStates.launchCrop(w: Int, h: Int, pickNewSource: Boolean) {
@@ -1173,6 +1266,10 @@ class CustomThemeActivity : AppCompatActivity() {
     }
 
     private fun done() {
+        if (!hasUnsavedChanges()) {
+            cancel()
+            return
+        }
         lifecycleScope.withLoadingDialog(this) {
             try {
                 var outputTheme = theme
@@ -1320,9 +1417,10 @@ class CustomThemeActivity : AppCompatActivity() {
         menu.item(R.string.theme_name, R.drawable.ic_baseline_edit_24, iconTint, true) {
             promptRenameTheme()
         }
-        menu.item(R.string.save, R.drawable.ic_baseline_check_24, iconTint, true) {
+        saveMenuItem = menu.item(R.string.save, R.drawable.ic_baseline_check_24, iconTint, true) {
             done()
         }
+        refreshSaveButtonState()
         return true
     }
 

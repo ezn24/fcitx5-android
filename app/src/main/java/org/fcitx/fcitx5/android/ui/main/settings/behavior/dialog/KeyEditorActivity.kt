@@ -109,8 +109,11 @@ class KeyEditorActivity : AppCompatActivity() {
     private var disableWeightEditing: Boolean = false
     private var composeOverrideEditorMode: Boolean = false
     private var hasInitialComposeOverride: Boolean = false
+    private var availableLayoutTargets: List<String> = emptyList()
     private var independentColor: Boolean = false
     private var keyData: MutableMap<String, Any?> = mutableMapOf()
+    private var keyColorOverrides: LinkedHashMap<String, Any?> = LinkedHashMap()
+    private var inheritedBaseKeyColorData: MutableMap<String, Any?> = mutableMapOf()
     private var composeOverrideData: MutableMap<String, Any?>? = null
 
     private lateinit var typeSpinner: Spinner
@@ -143,6 +146,7 @@ class KeyEditorActivity : AppCompatActivity() {
     private var macroWeightEdit: EditText? = null
 
     private var simpleWeightEdit: EditText? = null
+    private var rowHeightPercentEdit: EditText? = null
     private var nonMacroSwipeLabelEdit: EditText? = null
 
     private var macroTapStepsData: List<Any> = emptyList()
@@ -217,8 +221,8 @@ class KeyEditorActivity : AppCompatActivity() {
         registerForActivityResult(ThemeColorEditorActivity.Contract()) { result ->
             result ?: return@registerForActivityResult
             val field = editableColorFields.firstOrNull { it.customKey == result.fieldName } ?: return@registerForActivityResult
-            keyData[field.customKey] = result.color
-            keyData.remove(field.monetKey)
+            persistCurrentDraft()
+            setColorOverride(field, result.color, null)
             rebuildFields()
             updateActionButtonState()
         }
@@ -227,6 +231,9 @@ class KeyEditorActivity : AppCompatActivity() {
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
             val data = result.data ?: return@registerForActivityResult
             if (result.resultCode != RESULT_OK) return@registerForActivityResult
+            val colorOverrides = LinkedHashMap(keyColorOverrides)
+            persistCurrentDraft()
+            restoreColorOverrides(colorOverrides)
             when (data.getStringExtra(EXTRA_RESULT_ACTION)) {
                 RESULT_ACTION_SAVE -> {
                     val returned = serializableExtraCompat<HashMap<String, Any?>>(data, EXTRA_RESULT_KEY_DATA)
@@ -301,6 +308,7 @@ class KeyEditorActivity : AppCompatActivity() {
         isEditingSubModeLayout = intent.getBooleanExtra(EXTRA_IS_EDITING_SUBMODE_LAYOUT, false)
         currentSubModeLabel = intent.getStringExtra(EXTRA_CURRENT_SUBMODE_LABEL)
         hasMultiSubmodeSupport = intent.getBooleanExtra(EXTRA_HAS_MULTI_SUBMODE_SUPPORT, false)
+        availableLayoutTargets = intent.getStringArrayListExtra(EXTRA_AVAILABLE_LAYOUT_TARGETS)?.toList() ?: emptyList()
         lockTypeSelection = intent.getBooleanExtra(EXTRA_LOCK_TYPE_SELECTION, false)
         disableWeightEditing = intent.getBooleanExtra(EXTRA_DISABLE_WEIGHT_EDITING, false)
         composeOverrideEditorMode = intent.getBooleanExtra(EXTRA_COMPOSE_OVERRIDE_EDITOR_MODE, false)
@@ -308,6 +316,10 @@ class KeyEditorActivity : AppCompatActivity() {
 
         val received = serializableExtraCompat<HashMap<String, Any?>>(intent, EXTRA_KEY_DATA)
         keyData = received?.toMutableMap() ?: mutableMapOf()
+        keyColorOverrides = extractColorOverrides(keyData)
+        inheritedBaseKeyColorData = serializableExtraCompat<HashMap<String, Any?>>(intent, EXTRA_BASE_KEY_COLOR_DATA)
+            ?.toMutableMap()
+            ?: mutableMapOf()
         selectedType = intent.getStringExtra(EXTRA_FIXED_TYPE)
             ?: keyData["type"] as? String
             ?: "AlphabetKey"
@@ -384,6 +396,7 @@ class KeyEditorActivity : AppCompatActivity() {
         macroAltLabelEdit = null
         macroWeightEdit = null
         simpleWeightEdit = null
+        rowHeightPercentEdit = null
         nonMacroSwipeLabelEdit = null
         nonMacroSwipeStepsData = emptyList()
 
@@ -408,6 +421,16 @@ class KeyEditorActivity : AppCompatActivity() {
             macroDisplayTextSimpleValue = simpleValue
             macroDisplayTextModeItems.clear()
             macroDisplayTextModeItems.addAll(items)
+        }
+
+        if (!composeOverrideEditorMode) {
+            val rowHeightEdit = uiBuilder.createEditField(
+                getString(R.string.text_keyboard_layout_key_row_height_percent),
+                (keyData["rowHeightPercent"] as? Number)?.toString()
+                    ?: (keyData["rowHeightPercent"] as? String).orEmpty()
+            )
+            fieldsContainer.addView(rowHeightEdit.first)
+            rowHeightPercentEdit = rowHeightEdit.second
         }
 
         when (selectedType) {
@@ -753,6 +776,28 @@ class KeyEditorActivity : AppCompatActivity() {
                 LinearLayout.LayoutParams.WRAP_CONTENT
             )
         )
+
+        val statusView = TextView(this).apply {
+            text = buildComposeOverrideStatusPreview()
+            textSize = 12f
+            setTextColor(styledColor(android.R.attr.textColorSecondary))
+            setPadding(dp(8), dp(2), dp(8), dp(8))
+        }
+        fieldsContainer.addView(
+            statusView,
+            LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+        )
+    }
+
+    private fun buildComposeOverrideStatusPreview(): String {
+        return if (composeOverrideData == null) {
+            getString(R.string.text_keyboard_layout_compose_override_not_configured)
+        } else {
+            getString(R.string.text_keyboard_layout_compose_override_configured)
+        }
     }
 
     private fun renderFollowBaseKeyColorsToggle() {
@@ -772,6 +817,7 @@ class KeyEditorActivity : AppCompatActivity() {
         val switchView = SwitchCompat(this).apply {
             isChecked = independentColor
             setOnCheckedChangeListener { _, isChecked ->
+                persistCurrentDraft()
                 independentColor = isChecked
                 rebuildFields()
                 updateActionButtonState()
@@ -789,6 +835,7 @@ class KeyEditorActivity : AppCompatActivity() {
     }
 
     private fun openComposeOverrideEditor() {
+        persistCurrentDraft()
         val hasOverride = composeOverrideData != null
         val editorData = (composeOverrideData ?: mutableMapOf()).toMutableMap()
         if (editorData["type"] == null) {
@@ -799,6 +846,7 @@ class KeyEditorActivity : AppCompatActivity() {
         }
         val intent = Intent(this, KeyEditorActivity::class.java).apply {
             putExtra(EXTRA_KEY_DATA, toSerializableMap(editorData))
+            putExtra(EXTRA_BASE_KEY_COLOR_DATA, toSerializableMap(keyColorOverrides))
             putExtra(EXTRA_ROW_INDEX, -1)
             putExtra(EXTRA_DISABLE_WEIGHT_EDITING, true)
             putExtra(EXTRA_COMPOSE_OVERRIDE_EDITOR_MODE, true)
@@ -808,13 +856,19 @@ class KeyEditorActivity : AppCompatActivity() {
         composeOverrideEditorLauncher.launch(intent)
     }
 
+    private fun persistCurrentDraft() {
+        keyData.clear()
+        keyData.putAll(buildDraftKeyData())
+    }
+
     private fun renderColorEditors() {
         val theme = ThemeManager.activeTheme
         val colorEditorEnabled = !composeOverrideEditorMode || independentColor
         availableColorFields().forEach { field ->
             val title = getString(field.labelRes)
-            val customColor = parseColorInt(keyData[field.customKey])
-            val colorRef = keyData[field.monetKey] as? String
+            val colorSource = if (colorEditorEnabled) keyColorOverrides else inheritedBaseKeyColorData
+            val customColor = parseColorInt(colorSource[field.customKey])
+            val colorRef = colorSource[field.monetKey] as? String
             val modeText = when {
                 colorRef != null -> formatColorReferenceName(colorRef)
                 customColor != null -> formatAndroidColorCode(customColor)
@@ -902,8 +956,8 @@ class KeyEditorActivity : AppCompatActivity() {
 
         options += getString(R.string.text_keyboard_layout_key_color_mode_theme)
         actions += {
-            keyData.remove(field.customKey)
-            keyData.remove(field.monetKey)
+            persistCurrentDraft()
+            setColorOverride(field, null, null)
             rebuildFields()
             updateActionButtonState()
         }
@@ -931,7 +985,7 @@ class KeyEditorActivity : AppCompatActivity() {
         if (availableTokens.isEmpty()) return
 
         val theme = ThemeManager.activeTheme
-        val currentToken = (keyData[field.monetKey] as? String)
+        val currentToken = (keyColorOverrides[field.monetKey] as? String)
             ?.takeIf { it.startsWith(THEME_COLOR_REF_PREFIX) }
             ?.removePrefix(THEME_COLOR_REF_PREFIX)
         val checkedIndex = availableTokens.indexOfFirst { it.token == currentToken }
@@ -943,8 +997,8 @@ class KeyEditorActivity : AppCompatActivity() {
                 checkedIndex
             ) { dialog, which ->
                 val token = availableTokens.getOrNull(which)?.token ?: return@setSingleChoiceItems
-                keyData[field.monetKey] = "$THEME_COLOR_REF_PREFIX$token"
-                keyData.remove(field.customKey)
+                persistCurrentDraft()
+                setColorOverride(field, null, "$THEME_COLOR_REF_PREFIX$token")
                 dialog.dismiss()
                 rebuildFields()
                 updateActionButtonState()
@@ -954,8 +1008,13 @@ class KeyEditorActivity : AppCompatActivity() {
     }
 
     private fun openCustomColorEditor(field: EditableColorField) {
+        persistCurrentDraft()
         val theme = ThemeManager.activeTheme
-        val current = parseColorInt(keyData[field.customKey]) ?: field.themeColorGetter(theme)
+        val current = parseColorInt(keyColorOverrides[field.customKey])
+            ?: resolveColorReference(theme, keyColorOverrides[field.monetKey] as? String)
+            ?: resolveColorReference(theme, inheritedBaseKeyColorData[field.monetKey] as? String)
+            ?: parseColorInt(inheritedBaseKeyColorData[field.customKey])
+            ?: field.themeColorGetter(theme)
         if (DeviceUtil.isHMOS) {
             colorEditorLauncher.launch(
                 ThemeColorEditorActivity.EditorInput(
@@ -981,7 +1040,7 @@ class KeyEditorActivity : AppCompatActivity() {
             return
         }
         val available = SystemColorResourceId.getAvailableForSdk(Build.VERSION.SDK_INT)
-        val current = (keyData[field.monetKey] as? String)
+        val current = (keyColorOverrides[field.monetKey] as? String)
             ?.takeUnless { it.startsWith(THEME_COLOR_REF_PREFIX) }
             ?.let(SystemColorResourceId::fromResourceName)
             ?: available.firstOrNull()
@@ -989,10 +1048,11 @@ class KeyEditorActivity : AppCompatActivity() {
         SystemColorResourcePickerDialog.show(
             this,
             current,
-            object : SystemColorResourcePickerDialog.OnColorResourceSelectedListener {
-                override fun onColorResourceSelected(resourceId: SystemColorResourceId) {
-                    keyData[field.monetKey] = resourceId.resourceId
-                    keyData.remove(field.customKey)
+            listener = object : SystemColorResourcePickerDialog.OnColorResourceSelectedListener {
+                override fun onColorResourceSelected(resourceId: SystemColorResourceId?) {
+                    resourceId ?: return
+                    persistCurrentDraft()
+                    setColorOverride(field, null, resourceId.resourceId)
                     rebuildFields()
                     updateActionButtonState()
                 }
@@ -1265,6 +1325,9 @@ class KeyEditorActivity : AppCompatActivity() {
                 }
             }
         }
+        if (!composeOverrideEditorMode) {
+            parseRowHeightPercent(rowHeightPercentEdit?.text?.toString())?.let { draft["rowHeightPercent"] = it }
+        }
         composeOverrideData?.let { draft["composeOverride"] = toSerializableMap(it) }
         if (composeOverrideEditorMode) {
             draft["independentColor"] = independentColor
@@ -1344,6 +1407,7 @@ class KeyEditorActivity : AppCompatActivity() {
         eventType: String,
         callback: (List<Any>) -> Unit
     ) {
+        persistCurrentDraft()
         val intent = Intent(this, MacroEditorActivity::class.java)
         if (initialSteps.isNotEmpty()) {
             val serializableSteps = ArrayList<Map<*, *>>()
@@ -1355,6 +1419,10 @@ class KeyEditorActivity : AppCompatActivity() {
             }
         }
         intent.putExtra(MacroEditorActivity.EXTRA_EVENT_TYPE, eventType)
+        intent.putStringArrayListExtra(
+            MacroEditorActivity.EXTRA_LAYOUT_TARGETS,
+            ArrayList(availableLayoutTargets)
+        )
         macroEditCallback = callback
         macroEditorLauncher.launch(intent)
     }
@@ -1400,6 +1468,11 @@ class KeyEditorActivity : AppCompatActivity() {
                     val text = stepMap["text"] as? String ?: return@mapNotNull null
                     val displayText = if (text.length > 10) "${text.take(10)}..." else text
                     "$type:\"$displayText\""
+                }
+                "layer" -> {
+                    val target = stepMap["target"] as? String ?: return@mapNotNull null
+                    val mode = (stepMap["mode"] as? String)?.uppercase() ?: "TO"
+                    "layer($mode):$target"
                 }
                 else -> type
             }
@@ -1564,6 +1637,14 @@ class KeyEditorActivity : AppCompatActivity() {
             }
         }
 
+        if (!composeOverrideEditorMode) {
+            val rawRowHeight = rowHeightPercentEdit?.text?.toString()?.trim().orEmpty()
+            if (rawRowHeight.isNotEmpty() && parseRowHeightPercent(rawRowHeight) == null) {
+                Toast.makeText(this, R.string.text_keyboard_layout_row_height_percent_invalid, Toast.LENGTH_SHORT).show()
+                return null
+            }
+        }
+
         val newKey = mutableMapOf<String, Any?>()
         newKey["type"] = selectedType
 
@@ -1690,6 +1771,9 @@ class KeyEditorActivity : AppCompatActivity() {
                 }
             }
         }
+        if (!composeOverrideEditorMode) {
+            parseRowHeightPercent(rowHeightPercentEdit?.text?.toString())?.let { newKey["rowHeightPercent"] = it }
+        }
         composeOverrideData?.let { newKey["composeOverride"] = toSerializableMap(it) }
         if (composeOverrideEditorMode) {
             newKey["independentColor"] = independentColor
@@ -1701,13 +1785,51 @@ class KeyEditorActivity : AppCompatActivity() {
     }
 
     private fun appendColorOverrides(target: MutableMap<String, Any?>) {
+        if (composeOverrideEditorMode && !independentColor) return
         availableColorFields().forEach { field ->
-            val monet = (keyData[field.monetKey] as? String)?.takeIf { it.isNotBlank() }
+            val monet = (keyColorOverrides[field.monetKey] as? String)?.takeIf { it.isNotBlank() }
             if (monet != null) {
                 target[field.monetKey] = monet
             } else {
-                parseColorInt(keyData[field.customKey])?.let { target[field.customKey] = it }
+                parseColorInt(keyColorOverrides[field.customKey])?.let { target[field.customKey] = it }
             }
+        }
+    }
+
+    private fun setColorOverride(field: EditableColorField, customColor: Int?, colorRef: String?) {
+        keyColorOverrides.remove(field.customKey)
+        keyColorOverrides.remove(field.monetKey)
+        keyData.remove(field.customKey)
+        keyData.remove(field.monetKey)
+        when {
+            colorRef != null -> {
+                keyColorOverrides[field.monetKey] = colorRef
+                keyData[field.monetKey] = colorRef
+            }
+            customColor != null -> {
+                keyColorOverrides[field.customKey] = customColor
+                keyData[field.customKey] = customColor
+            }
+        }
+    }
+
+    private fun extractColorOverrides(source: Map<String, Any?>): LinkedHashMap<String, Any?> {
+        val colors = LinkedHashMap<String, Any?>()
+        editableColorFields.forEach { field ->
+            source[field.customKey]?.let { colors[field.customKey] = it }
+            source[field.monetKey]?.let { colors[field.monetKey] = it }
+        }
+        return colors
+    }
+
+    private fun restoreColorOverrides(colors: Map<String, Any?>) {
+        editableColorFields.forEach { field ->
+            keyData.remove(field.customKey)
+            keyData.remove(field.monetKey)
+        }
+        keyColorOverrides = LinkedHashMap(colors)
+        colors.forEach { (key, value) ->
+            keyData[key] = value
         }
     }
 
@@ -1722,6 +1844,13 @@ class KeyEditorActivity : AppCompatActivity() {
         return weight?.takeIf { it in 0.0f..1.0f }
     }
 
+    private fun parseRowHeightPercent(text: String?): Float? {
+        val value = text?.trim()
+            ?.takeUnless { it.isEmpty() || it.equals("null", ignoreCase = true) }
+            ?.toFloatOrNull()
+        return value?.takeIf { it in 1f..100f }
+    }
+
     companion object {
         private const val THEME_COLOR_REF_PREFIX = "theme:"
         private const val MENU_SAVE_ID = 5001
@@ -1733,12 +1862,14 @@ class KeyEditorActivity : AppCompatActivity() {
         const val EXTRA_IS_EDITING_SUBMODE_LAYOUT = "is_editing_submode_layout"
         const val EXTRA_CURRENT_SUBMODE_LABEL = "current_submode_label"
         const val EXTRA_HAS_MULTI_SUBMODE_SUPPORT = "has_multi_submode_support"
+        const val EXTRA_AVAILABLE_LAYOUT_TARGETS = "available_layout_targets"
         const val EXTRA_LOCK_TYPE_SELECTION = "lock_type_selection"
         const val EXTRA_DISABLE_WEIGHT_EDITING = "disable_weight_editing"
         const val EXTRA_COMPOSE_OVERRIDE_EDITOR_MODE = "compose_override_editor_mode"
         const val EXTRA_HAS_INITIAL_COMPOSE_OVERRIDE = "has_initial_compose_override"
         const val EXTRA_FIXED_TYPE = "fixed_type"
         const val EXTRA_TITLE_OVERRIDE = "title_override"
+        private const val EXTRA_BASE_KEY_COLOR_DATA = "base_key_color_data"
 
         const val EXTRA_RESULT_ACTION = "result_action"
         const val EXTRA_RESULT_KEY_DATA = "result_key_data"

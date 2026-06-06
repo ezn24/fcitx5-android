@@ -24,6 +24,7 @@ import org.fcitx.fcitx5.android.input.keyboard.KeyRef
 object LayoutJsonUtils {
 
     private const val TAG = "LayoutJsonUtils"
+    const val LAYER_SUBMODE_PREFIX = "__layer__:"
     private val KEY_FIELD_ORDER = listOf(
         "type",
         "main",
@@ -33,6 +34,7 @@ object LayoutJsonUtils {
         "altLabel",
         "subLabel",
         "weight",
+        "rowHeightPercent",
         "tap",
         "swipe",
         "longPress",
@@ -47,6 +49,29 @@ object LayoutJsonUtils {
         "shadowColor",
         "shadowColorMonet"
     )
+
+    fun toLayerSubModeLabel(childName: String): String = "$LAYER_SUBMODE_PREFIX$childName"
+
+    fun isLayerSubModeLabel(label: String): Boolean = label.startsWith(LAYER_SUBMODE_PREFIX)
+
+    fun childNameFromLayerLabel(label: String): String =
+        label.removePrefix(LAYER_SUBMODE_PREFIX)
+
+    fun baseLayoutNameFromEntryKey(key: String): String {
+        return when {
+            key.contains(":$LAYER_SUBMODE_PREFIX") -> key.substringBefore(":$LAYER_SUBMODE_PREFIX")
+            key.contains(':') -> key.substringBeforeLast(':')
+            else -> key
+        }
+    }
+
+    fun subModeLabelFromEntryKey(key: String, baseName: String): String {
+        return if (key == baseName) {
+            "default"
+        } else {
+            key.removePrefix("$baseName:")
+        }
+    }
 
     // ==================== 解析功能 ====================
 
@@ -205,6 +230,7 @@ object LayoutJsonUtils {
             subLabel = obj["subLabel"]?.jsonPrimitive?.content,
             swipeLabel = obj["swipeLabel"]?.jsonPrimitive?.content,
             weight = parseOptionalFloat(obj["weight"]),
+            rowHeightPercent = parseOptionalFloat(obj["rowHeightPercent"]),
             textColor = parseOptionalInt(obj["textColor"]),
             textColorMonet = obj["textColorMonet"]?.jsonPrimitive?.contentOrNull,
             altTextColor = parseOptionalInt(obj["altTextColor"]),
@@ -262,6 +288,10 @@ object LayoutJsonUtils {
             "text" -> MacroStep.Text(obj["text"]?.jsonPrimitive?.content ?: "")
             "edit" -> MacroStep.Edit(obj["action"]?.jsonPrimitive?.content ?: "copy")
             "app" -> MacroStep.AppAction(obj["id"]?.jsonPrimitive?.content ?: "theme")
+            "layer" -> MacroStep.LayerSwitch(
+                mode = parseLayerSwitchMode(obj["mode"]?.jsonPrimitive?.content),
+                target = obj["target"]?.jsonPrimitive?.content ?: ""
+            )
             "shortcut" -> {
                 val modifiers = obj["modifiers"]?.jsonArray?.map { parseKeyRef(it.jsonObject) }
                     ?: obj["modifier"]?.jsonObject?.let { listOf(parseKeyRef(it)) }
@@ -271,6 +301,20 @@ object LayoutJsonUtils {
                 MacroStep.Shortcut(modifiers, key)
             }
             else -> throw IllegalArgumentException("Unknown step type: $type")
+        }
+    }
+
+    private fun parseLayerSwitchMode(raw: String?): KeyAction.LayerSwitchMode {
+        return when (raw?.lowercase()) {
+            "osl" -> KeyAction.LayerSwitchMode.OSL
+            else -> KeyAction.LayerSwitchMode.TO
+        }
+    }
+
+    private fun layerSwitchModeToString(mode: KeyAction.LayerSwitchMode): String {
+        return when (mode) {
+            KeyAction.LayerSwitchMode.TO -> "to"
+            KeyAction.LayerSwitchMode.OSL -> "osl"
         }
     }
 
@@ -343,6 +387,7 @@ object LayoutJsonUtils {
      */
     private fun normalizeKeyValue(key: String, value: Any?): Any? {
         if (key != "weight" &&
+            key != "rowHeightPercent" &&
             key != "textColor" &&
             key != "altTextColor" &&
             key != "backgroundColor" &&
@@ -350,12 +395,12 @@ object LayoutJsonUtils {
         ) return value
         return when (value) {
             null -> null
-            is Number -> if (key == "weight") value.toFloat() else value.toInt()
+            is Number -> if (key == "weight" || key == "rowHeightPercent") value.toFloat() else value.toInt()
             is String -> {
                 value.trim()
                     .takeUnless { it.isEmpty() || it.equals("null", ignoreCase = true) }
                     ?.let {
-                        if (key == "weight") {
+                        if (key == "weight" || key == "rowHeightPercent") {
                             it.toFloatOrNull()
                         } else {
                             when {
@@ -435,6 +480,7 @@ object LayoutJsonUtils {
         val swipe: MacroAction? = null,  // MacroKey 使用
         val longPress: MacroAction? = null,  // MacroKey 使用
         val independentColor: Boolean? = null,
+        val rowHeightPercent: Float? = null,
         val composeOverride: KeyJson? = null
     )
 
@@ -532,6 +578,7 @@ object LayoutJsonUtils {
         keyDef.composeOverride?.let { overrideDef ->
             val overrideJson = keyDefToJson(overrideDef).toMutableMap()
             overrideJson.remove("weight")
+            overrideJson.remove("rowHeightPercent")
             if ((overrideJson["type"] as? String).isNullOrBlank()) {
                 overrideJson["type"] = type
             }
@@ -539,6 +586,9 @@ object LayoutJsonUtils {
         }
         if (keyDef.independentColor) {
             json["independentColor"] = true
+        }
+        keyDef.rowHeightPercent?.let { rowHeight ->
+            json["rowHeightPercent"] = rowHeight
         }
 
         return json
@@ -586,6 +636,11 @@ object LayoutJsonUtils {
             is MacroStep.AppAction -> JsonObject(mapOf(
                 "type" to JsonPrimitive("app"),
                 "id" to JsonPrimitive(step.id)
+            ))
+            is MacroStep.LayerSwitch -> JsonObject(mapOf(
+                "type" to JsonPrimitive("layer"),
+                "mode" to JsonPrimitive(layerSwitchModeToString(step.mode)),
+                "target" to JsonPrimitive(step.target)
             ))
             is MacroStep.Shortcut -> JsonObject(mapOf(
                 "type" to JsonPrimitive("shortcut"),
@@ -758,9 +813,10 @@ object LayoutJsonUtils {
             }
             else -> SpaceKey() // Fallback
         }
+        keyDef.rowHeightPercent = key.rowHeightPercent?.takeIf { it in 1f..100f }
         key.composeOverride?.let { override ->
             val overrideDef = createKeyDef(
-                override.copy(composeOverride = null, weight = null),
+                override.copy(composeOverride = null, weight = null, rowHeightPercent = null),
                 subModeLabel,
                 subModeName
             )
@@ -788,12 +844,13 @@ object LayoutJsonUtils {
      * @return JSON 对象
      */
     fun convertToSaveJson(
-        entries: Map<String, List<List<Map<String, Any?>>>>
+        entries: Map<String, List<List<Map<String, Any?>>>>,
+        layoutHeightPercentOverrides: Map<String, Int> = emptyMap()
     ): JsonObject {
         val layoutMap = mutableMapOf<String, JsonElement>()
 
         val baseLayoutNames = entries.keys.map { key ->
-            if (key.contains(':')) key.substringBeforeLast(':') else key
+            baseLayoutNameFromEntryKey(key)
         }.distinct()
 
         for (baseName in baseLayoutNames) {
@@ -807,13 +864,16 @@ object LayoutJsonUtils {
 
             if (hasSubModeKeys) {
                 val subModeMap = mutableMapOf<String, JsonElement>()
+                layoutHeightPercentOverrides[baseName]
+                    ?.takeIf { it in 10..90 }
+                    ?.let { percent ->
+                        subModeMap["__meta__"] = JsonObject(
+                            mapOf("keyboard_height_percent" to JsonPrimitive(percent))
+                        )
+                    }
 
                 for (key in subModeKeys) {
-                    val subModeLabel = if (key.contains(':')) {
-                        key.substringAfterLast(':').ifEmpty { "default" }
-                    } else {
-                        "default"
-                    }
+                    val subModeLabel = subModeLabelFromEntryKey(key, baseName)
 
                     val rows = entries[key]!!
                     val jsonArray = JsonArray(rows.map { row ->
@@ -826,8 +886,25 @@ object LayoutJsonUtils {
                             )
                         })
                     })
-
-                    subModeMap[subModeLabel] = jsonArray
+                    val overrideKey = if (subModeLabel == "default") {
+                        baseName
+                    } else {
+                        "$baseName:$subModeLabel"
+                    }
+                    val subModeOverridePercent =
+                        layoutHeightPercentOverrides[overrideKey]?.takeIf { it in 10..90 }
+                    subModeMap[subModeLabel] = if (subModeLabel != "default" && subModeOverridePercent != null) {
+                        JsonObject(
+                            mapOf(
+                                "__meta__" to JsonObject(
+                                    mapOf("keyboard_height_percent" to JsonPrimitive(subModeOverridePercent))
+                                ),
+                                "default" to jsonArray
+                            )
+                        )
+                    } else {
+                        jsonArray
+                    }
                 }
 
                 layoutMap[baseName] = JsonObject(subModeMap.toSortedMap())
@@ -844,7 +921,19 @@ object LayoutJsonUtils {
                         )
                     })
                 })
-                layoutMap[baseName] = jsonArray
+                val overridePercent = layoutHeightPercentOverrides[baseName]?.takeIf { it in 10..90 }
+                layoutMap[baseName] = if (overridePercent == null) {
+                    jsonArray
+                } else {
+                    JsonObject(
+                        mapOf(
+                            "__meta__" to JsonObject(
+                                mapOf("keyboard_height_percent" to JsonPrimitive(overridePercent))
+                            ),
+                            "default" to jsonArray
+                        )
+                    )
+                }
             }
         }
 

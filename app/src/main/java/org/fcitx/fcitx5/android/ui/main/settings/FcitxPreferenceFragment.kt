@@ -4,6 +4,7 @@
  */
 package org.fcitx.fcitx5.android.ui.main.settings
 
+import android.net.Uri
 import android.os.Bundle
 import android.view.View
 import androidx.activity.OnBackPressedCallback
@@ -32,6 +33,8 @@ abstract class FcitxPreferenceFragment : PaddingPreferenceFragment() {
 
     private lateinit var raw: RawConfig
     private var configLoaded = false
+
+    private val supportedExternalProtocol = 2
 
     private val supervisorJob = SupervisorJob()
     private val scope = CoroutineScope(supervisorJob)
@@ -97,7 +100,10 @@ abstract class FcitxPreferenceFragment : PaddingPreferenceFragment() {
         val context = requireContext()
         lifecycleScope.withLoadingDialog(context) {
             raw = fcitx.runOnReady { obtainConfig(this) }
-            configLoaded = raw.findByName("cfg") != null && raw.findByName("desc") != null
+            val hasCfgDesc = raw.findByName("cfg") != null && raw.findByName("desc") != null
+            val requiredExternalProtocol = maxRequiredExternalProtocol(raw)
+            val protocolCompatible = requiredExternalProtocol <= supportedExternalProtocol
+            configLoaded = hasCfgDesc && protocolCompatible
             preferenceScreen = if (configLoaded) {
                 PreferenceScreenFactory.create(
                     preferenceManager, parentFragmentManager, raw, ::save
@@ -107,6 +113,17 @@ abstract class FcitxPreferenceFragment : PaddingPreferenceFragment() {
                     }
                     onPreferenceUiCreated(this)
                 }
+            } else if (hasCfgDesc && !protocolCompatible) {
+                preferenceManager.createPreferenceScreen(context).apply {
+                    addPreference(
+                        R.string.config_protocol_not_supported_title,
+                        context.getString(
+                            R.string.config_protocol_not_supported_summary,
+                            requiredExternalProtocol,
+                            supportedExternalProtocol
+                        )
+                    )
+                }
             } else {
                 preferenceManager.createPreferenceScreen(context).apply {
                     addPreference(R.string.config_addon_not_loaded)
@@ -114,6 +131,34 @@ abstract class FcitxPreferenceFragment : PaddingPreferenceFragment() {
             }
             viewModel.disableAboutButton()
         }
+    }
+
+    private fun maxRequiredExternalProtocol(raw: RawConfig): Int {
+        val descRoot = raw.findByName("desc") ?: return 0
+        var maxProtocol = 0
+
+        fun updateFromUri(uriText: String) {
+            if (!uriText.startsWith("fcitx://")) {
+                return
+            }
+            val required = runCatching {
+                val uri = Uri.parse(uriText)
+                uri.getQueryParameter("app_proto")?.toIntOrNull()
+                    ?: uri.getQueryParameter("min_app_proto")?.toIntOrNull()
+                    ?: 0
+            }.getOrDefault(0)
+            if (required > maxProtocol) {
+                maxProtocol = required
+            }
+        }
+
+        fun walk(node: RawConfig) {
+            node.findByName("External")?.value?.let(::updateFromUri)
+            node.subItems?.forEach(::walk)
+        }
+
+        walk(descRoot)
+        return maxProtocol
     }
 
     override fun onStart() {

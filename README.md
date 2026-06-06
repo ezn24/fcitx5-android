@@ -4,7 +4,6 @@
 
 基于原仓几乎全程 vibe coding 而成，在[上游原仓](https://github.com/fxliang/fcitx5-android)上增加了相当若干特性，包名为了方便网友同时使用体验使用改成了`org.fcitx.fcitx5.android.ez`，总体上可以理解成原仓做的超集, 可在[releases](https://github.com/ezn24/fcitx5-android/releases)下面下载体验。
 
-
 ## 修改内容：
 - 为默认英语添加 自定词库 & 自定字词功能
 - 拉取最新 Unicode emoji
@@ -17,7 +16,7 @@
 ./gradlew -PincludeMainlineFlavor=true :app:assembleMainlineRelease
 ```
 
-mainline 变体会输出无 `.ez` 后缀的包名、应用名、资源以及 APK/日志命名（输出路径为 `app/build/outputs/apk/mainline/<buildType>`，数据目录 `/Android/data/org.fcitx.fcitx5.android/...` 亦跟主仓一致），运行时与 upstream 原仓保持一致；其余构建逻辑与 fx 变体完全相同。
+mainline 变体会输出无 `.ez` 后缀的包名、应用名、资源以及 APK/日志命名（输出路径为 `app/build/outputs/apk/mainline/<buildType>`，数据目录 `/Android/data/org.fcitx.fcitx5.android/...` 亦跟主仓一致），运行时与 upstream 原仓保持一致；其余构建逻辑与 ez 变体完全相同。
 
 
 
