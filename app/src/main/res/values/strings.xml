@@ -503,6 +503,11 @@
     <string name="english_manage_custom_predictions">Manage Custom Predictions</string>
     <string name="english_custom_prediction_phrase">Phrase</string>
     <string name="english_custom_prediction_invalid">Enter 2 to 12 English words</string>
+    <string name="english_custom_prediction_score">Weight</string>
+    <string name="english_custom_prediction_score_hint">Enter a phrase to check competing weights</string>
+    <string name="english_custom_prediction_score_no_competition">No existing predictions for “%1$s”. Default 5 is enough.</string>
+    <string name="english_custom_prediction_score_competition">For “%1$s”, top %2$d weights: %3$s. Use at least %4$d to enter top %2$d.</string>
+    <string name="english_custom_prediction_invalid_score">Weight must be a positive number</string>
     <string name="english_manage_custom_phrase">Manage Custom Phrase</string>
     <string name="english_no_imported_dictionaries">No imported word lists</string>
     <string name="english_delete_dictionary_title">Delete word list</string>

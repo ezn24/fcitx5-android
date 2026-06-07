@@ -491,6 +491,11 @@
     <string name="english_manage_custom_predictions">管理自定义联想</string>
     <string name="english_custom_prediction_phrase">短语</string>
     <string name="english_custom_prediction_invalid">请输入 2 到 12 个英文单词</string>
+    <string name="english_custom_prediction_score">权重</string>
+    <string name="english_custom_prediction_score_hint">输入短语后会检查已有联想权重</string>
+    <string name="english_custom_prediction_score_no_competition">“%1$s” 暂无已有联想。默认 5 已足够。</string>
+    <string name="english_custom_prediction_score_competition">“%1$s” 前 %2$d 权重：%3$s。至少设为 %4$d 可进入前 %2$d。</string>
+    <string name="english_custom_prediction_invalid_score">权重必须是正数</string>
     <string name="english_manage_custom_phrase">管理自定义字词</string>
     <string name="english_no_imported_dictionaries">没有已导入词库</string>
     <string name="english_delete_dictionary_title">删除词库</string>

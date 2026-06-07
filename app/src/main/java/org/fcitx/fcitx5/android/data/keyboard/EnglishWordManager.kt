@@ -39,7 +39,40 @@ data class EnglishCustomPhrase(
     }
 }
 
+data class EnglishCustomPhrasePrediction(
+    val phrase: String,
+    val score: Int = DefaultScore
+) {
+    fun serialize(): String = listOf(
+        phrase,
+        score.coerceAtLeast(1).toString()
+    ).joinToString("\t")
+
+    companion object {
+        const val DefaultScore = 5
+
+        fun parse(line: String): EnglishCustomPhrasePrediction? {
+            val parts = line.split('\t', limit = 2)
+            val phrase = EnglishWordManager.normalizePredictionPhrase(parts[0])
+            if (phrase.isEmpty()) return null
+            val score = parts.getOrNull(1)?.toIntOrNull()?.coerceAtLeast(1) ?: DefaultScore
+            return EnglishCustomPhrasePrediction(phrase, score)
+        }
+    }
+}
+
+data class EnglishPhrasePredictionWeightInfo(
+    val prefix: String,
+    val candidates: List<Pair<String, Int>>
+) {
+    val highestScore: Int get() = candidates.firstOrNull()?.second ?: 0
+    val visibleThresholdScore: Int get() =
+        candidates.getOrNull(EnglishWordManager.DefaultPhrasePredictionSize - 1)?.second ?: 0
+}
+
 object EnglishWordManager {
+
+    const val DefaultPhrasePredictionSize = 10
 
     private val dataDir = File(
         appContext.getExternalFilesDir(null)!!,
@@ -55,6 +88,8 @@ object EnglishWordManager {
     private val userWordsFile = File(dataDir, "user_words.txt")
     private val customPhrasesFile = File(dataDir, "custom_phrases.txt")
     private val customPhrasePredictionsFile = File(dataDir, "custom_phrase_predictions.txt")
+    private val phrasePredictionsFile = File(dataDir, "phrase_predictions.txt")
+    private val learnedPhrasePredictionsFile = File(dataDir, "learned_phrase_predictions.txt")
 
     fun loadUserWords(): List<String> {
         if (!userWordsFile.exists()) return emptyList()
@@ -97,23 +132,104 @@ object EnglishWordManager {
         )
     }
 
-    fun loadCustomPhrasePredictions(): List<String> {
+    fun loadCustomPhrasePredictions(): List<EnglishCustomPhrasePrediction> {
         if (!customPhrasePredictionsFile.exists()) return emptyList()
         return customPhrasePredictionsFile.readLines()
-            .map { normalizePredictionPhrase(it) }
-            .filter { it.isNotEmpty() }
-            .distinct()
+            .mapNotNull { EnglishCustomPhrasePrediction.parse(it) }
+            .distinctBy { it.phrase }
     }
 
-    fun saveCustomPhrasePredictions(entries: List<String>) {
+    fun saveCustomPhrasePredictions(entries: List<EnglishCustomPhrasePrediction>) {
         dataDir.mkdirs()
         customPhrasePredictionsFile.writeText(
             entries.asSequence()
-                .map { normalizePredictionPhrase(it) }
-                .filter { it.isNotEmpty() }
-                .distinct()
+                .mapNotNull {
+                    val phrase = normalizePredictionPhrase(it.phrase)
+                    if (phrase.isEmpty()) {
+                        null
+                    } else {
+                        it.copy(phrase = phrase, score = it.score.coerceAtLeast(1)).serialize()
+                    }
+                }
+                .distinctBy { it.substringBefore('\t') }
                 .joinToString("\n")
         )
+    }
+
+    fun phrasePredictionWeightInfo(rawPhrase: String): EnglishPhrasePredictionWeightInfo? {
+        val phrase = normalizePredictionPhrase(rawPhrase)
+        if (phrase.isEmpty()) return null
+        val words = phrase.split(' ')
+        if (words.size < 2) return null
+        val prefixWords = words.dropLast(1).takeLast(MaxPrefixWords)
+        val prefix = prefixWords.joinToString(" ")
+        val scores = linkedMapOf<String, Int>()
+
+        fun add(prefixCandidate: String, next: String, score: Int) {
+            if (prefixCandidate != prefix || next.isEmpty()) return
+            scores[next] = (scores[next] ?: 0) + score.coerceAtLeast(1)
+        }
+
+        fun addPhrase(phraseWords: List<String>, score: Int) {
+            if (phraseWords.size !in 2..12) return
+            for (begin in 0 until phraseWords.lastIndex) {
+                val maxLen = minOf(MaxPrefixWords, phraseWords.size - begin - 1)
+                for (len in 1..maxLen) {
+                    add(
+                        phraseWords.subList(begin, begin + len).joinToString(" "),
+                        phraseWords[begin + len],
+                        score
+                    )
+                }
+            }
+        }
+
+        fun readLines(lines: Sequence<String>, baseScore: Int) {
+            lines.forEach { line ->
+                val parts = line.split('\t', limit = 3)
+                if (parts.size >= 2 && line.contains('\t')) {
+                    val prefixWordsFromLine = predictionWords(parts[0])
+                    val nextWords = predictionWords(parts[1])
+                    if (prefixWordsFromLine.isNotEmpty() && nextWords.isNotEmpty()) {
+                        val score = parts.getOrNull(2)?.toIntOrNull()?.coerceAtLeast(1) ?: baseScore
+                        add(prefixWordsFromLine.joinToString(" "), nextWords.first(), score)
+                    } else if (prefixWordsFromLine.isNotEmpty()) {
+                        val score = parts.getOrNull(1)?.toIntOrNull()?.coerceAtLeast(1)
+                        if (score != null) {
+                            addPhrase(prefixWordsFromLine, score)
+                        }
+                    }
+                } else {
+                    addPhrase(predictionWords(line), baseScore)
+                }
+            }
+        }
+
+        runCatching {
+            appContext.assets.open("usr/share/fcitx5/androidkeyboard/phrase_predictions.txt")
+                .bufferedReader()
+                .useLines { readLines(it, 1) }
+        }
+        if (phrasePredictionsFile.isFile) {
+            phrasePredictionsFile.useLines { readLines(it, EnglishCustomPhrasePrediction.DefaultScore) }
+        }
+        if (customPhrasePredictionsFile.isFile) {
+            customPhrasePredictionsFile.useLines {
+                readLines(it, EnglishCustomPhrasePrediction.DefaultScore)
+            }
+        }
+        if (learnedPhrasePredictionsFile.isFile) {
+            learnedPhrasePredictionsFile.useLines { readLines(it, 1) }
+        }
+        listPhraseBooks().forEach { file ->
+            file.useLines { readLines(it, EnglishCustomPhrasePrediction.DefaultScore) }
+        }
+
+        val candidates = scores.entries
+            .sortedWith(compareByDescending<Map.Entry<String, Int>> { it.value }.thenBy { it.key })
+            .take(DefaultPhrasePredictionSize)
+            .map { it.key to it.value }
+        return EnglishPhrasePredictionWeightInfo(prefix, candidates)
     }
 
     fun importWords(stream: InputStream, fileName: String): Int {
@@ -206,6 +322,20 @@ object EnglishWordManager {
             return ""
         }
         return words.joinToString(" ")
+    }
+
+    private const val MaxPrefixWords = 4
+
+    private fun predictionWords(raw: String): List<String> {
+        return raw.substringBefore('#')
+            .lowercase()
+            .split(Regex("[^a-z'-]+"))
+            .map { it.trim('-') }
+            .filter { word ->
+                word.isNotEmpty() &&
+                    word.length <= 32 &&
+                    word.all { it.isLetter() || it == '\'' || it == '-' }
+            }
     }
 
     fun dictionaryFileName(raw: String): String {

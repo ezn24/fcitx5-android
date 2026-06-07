@@ -10,11 +10,18 @@
 
 ## 增加内容：
 
-- 为默认英语
-  - 自定词库
+- 英语输入法：
+  - 自定词典
   - 自定字词功能
-  - 新增单词句子联想（本地，来源于 [Tatoeba](https://downloads.tatoeba.org/exports/sentences.tar.bz2) 和 [Google Books Ngram](https://storage.googleapis.com/books/ngrams/books/20200217)）
-  - 自定联想
+  - 短语联想（本地自带来源于 [Tatoeba](https://downloads.tatoeba.org/exports/sentences.tar.bz2) 和 [Google Books Ngram](https://storage.googleapis.com/books/ngrams/books/20200217)）：
+    - 自定联想词库：用户可以自行寻找实用的联想词库
+    - 权重机制：权重越高，就会出现在越前面
+    - 预设联想数量：因为自带联想词库庞大，所以默认只会显示权重前10高的短语，用户也可以在设置里自定
+    - 自定联想：
+      - 新增需要输入想要添加的短语比如 your mum  
+        稍等片刻底列出目前相关联想权重前10高的短语
+        用户可以根据需求调整短语的权重
+    - 联想权重学习：会根据用户的使用频率调整权重
 - 拉取最新 Unicode emoji (部分多人emoji没有放入)
 - 改进拼音输入 emoji 的触发 & 添加自定拼音emoji字典的编辑
 - 新增为三星用户设计的音效开关，开启可启用三星键盘的音效

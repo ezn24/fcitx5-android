@@ -15,6 +15,7 @@
 #include <fstream>
 #include <iterator>
 #include <sstream>
+#include <tuple>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -26,6 +27,11 @@
 namespace fcitx {
 
 namespace {
+
+constexpr size_t MaxPrefixWords = 4;
+constexpr size_t MaxLearnedPhrasePredictions = 5000;
+constexpr int LearnedPhrasePredictionIncrement = 1000;
+constexpr int MaxLearnedPhrasePredictionScore = 100000;
 
 std::string asciiLower(std::string value) {
     std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) {
@@ -126,6 +132,26 @@ std::string joinWords(const std::vector<std::string> &words, size_t begin, size_
         result.append(words[i]);
     }
     return result;
+}
+
+std::filesystem::path androidKeyboardDataDir() {
+    const char *dataHome = std::getenv("FCITX_DATA_HOME");
+    if (!dataHome) {
+        return {};
+    }
+    return std::filesystem::path(dataHome) / "androidkeyboard";
+}
+
+void addPhrasePredictionScore(
+        std::unordered_map<std::string, std::unordered_map<std::string, int>> &scores,
+        const std::string &prefix,
+        const std::string &next,
+        int score) {
+    if (prefix.empty() || next.empty()) {
+        return;
+    }
+    auto &value = scores[prefix][next];
+    value = std::min(MaxLearnedPhrasePredictionScore, value + std::max(1, score));
 }
 
 class AndroidKeyboardCandidateWord : public CandidateWord {
@@ -368,6 +394,7 @@ void AndroidKeyboardEngine::recordCommittedText(InputContext *inputContext, cons
     if (words.empty()) {
         return;
     }
+    learnPhrasePrediction(inputContext, words);
     auto *state = inputContext->propertyFor(&factory_);
     state->contextWords_.insert(state->contextWords_.end(), words.begin(), words.end());
     constexpr size_t MaxContextWords = 4;
@@ -377,6 +404,86 @@ void AndroidKeyboardEngine::recordCommittedText(InputContext *inputContext, cons
                 state->contextWords_.begin() + static_cast<std::ptrdiff_t>(
                         state->contextWords_.size() - MaxContextWords));
     }
+}
+
+void AndroidKeyboardEngine::learnPhrasePrediction(
+        InputContext *inputContext,
+        const std::vector<std::string> &words) {
+    const auto base = androidKeyboardDataDir();
+    if (base.empty()) {
+        return;
+    }
+    auto *state = inputContext->propertyFor(&factory_);
+    std::vector<std::string> combined = state->contextWords_;
+    const auto firstNewWord = combined.size();
+    combined.insert(combined.end(), words.begin(), words.end());
+    if (combined.size() < 2) {
+        return;
+    }
+
+    std::unordered_map<std::string, std::unordered_map<std::string, int>> scores;
+    const auto learnedFile = base / "learned_phrase_predictions.txt";
+    {
+        std::ifstream stream(learnedFile);
+        std::string line;
+        while (std::getline(stream, line)) {
+            auto parts = splitTabs(line, 3);
+            if (parts.size() < 3) {
+                continue;
+            }
+            const auto prefixWords = tokenizeEnglishWords(parts[0]);
+            const auto nextWords = tokenizeEnglishWords(parts[1]);
+            if (prefixWords.empty() || nextWords.empty()) {
+                continue;
+            }
+            int score = 1;
+            try {
+                score = std::max(1, std::stoi(parts[2]));
+            } catch (...) {
+            }
+            scores[joinWords(prefixWords, 0, prefixWords.size())][nextWords.front()] =
+                    std::min(MaxLearnedPhrasePredictionScore, score);
+        }
+    }
+
+    const auto learnBegin = firstNewWord == 0 ? 1 : firstNewWord;
+    for (size_t nextIndex = learnBegin; nextIndex < combined.size(); nextIndex++) {
+        const auto maxLen = std::min(MaxPrefixWords, nextIndex);
+        for (size_t len = 1; len <= maxLen; len++) {
+            addPhrasePredictionScore(
+                    scores,
+                    joinWords(combined, nextIndex - len, nextIndex),
+                    combined[nextIndex],
+                    LearnedPhrasePredictionIncrement);
+        }
+    }
+
+    std::vector<std::tuple<std::string, std::string, int>> flattened;
+    for (const auto &[prefix, nextScores]: scores) {
+        for (const auto &[next, score]: nextScores) {
+            flattened.emplace_back(prefix, next, score);
+        }
+    }
+    std::stable_sort(flattened.begin(), flattened.end(), [](const auto &lhs, const auto &rhs) {
+        if (std::get<2>(lhs) != std::get<2>(rhs)) {
+            return std::get<2>(lhs) > std::get<2>(rhs);
+        }
+        if (std::get<0>(lhs) != std::get<0>(rhs)) {
+            return std::get<0>(lhs) < std::get<0>(rhs);
+        }
+        return std::get<1>(lhs) < std::get<1>(rhs);
+    });
+    if (flattened.size() > MaxLearnedPhrasePredictions) {
+        flattened.resize(MaxLearnedPhrasePredictions);
+    }
+
+    std::error_code ec;
+    std::filesystem::create_directories(base, ec);
+    std::ofstream stream(learnedFile, std::ios::trunc);
+    for (const auto &[prefix, next, score]: flattened) {
+        stream << prefix << '\t' << next << '\t' << score << '\n';
+    }
+    userWordsLastModified_ = {};
 }
 
 void AndroidKeyboardEngine::updateCandidate(const InputMethodEntry &entry, InputContext *inputContext) {
@@ -545,6 +652,7 @@ void AndroidKeyboardEngine::reloadUserWordsIfNeeded() {
     const fs::path userWordsFile = base / "user_words.txt";
     const fs::path customPhrasesFile = base / "custom_phrases.txt";
     const fs::path customPhrasePredictionsFile = base / "custom_phrase_predictions.txt";
+    const fs::path learnedPhrasePredictionsFile = base / "learned_phrase_predictions.txt";
     const fs::path phrasePredictionsFile = base / "phrase_predictions.txt";
     const fs::path dictionariesDir = base / "dictionaries";
     const fs::path phraseBooksDir = base / "phrasebooks";
@@ -559,6 +667,7 @@ void AndroidKeyboardEngine::reloadUserWordsIfNeeded() {
     considerModified(userWordsFile);
     considerModified(customPhrasesFile);
     considerModified(customPhrasePredictionsFile);
+    considerModified(learnedPhrasePredictionsFile);
     considerModified(phrasePredictionsFile);
     std::error_code ec;
     if (fs::exists(dictionariesDir, ec) && fs::is_directory(dictionariesDir, ec)) {
@@ -614,7 +723,6 @@ void AndroidKeyboardEngine::reloadUserWordsIfNeeded() {
     auto addPhrasePrediction = [&predictionScores](
             const std::vector<std::string> &phraseWords,
             int score) {
-        constexpr size_t MaxPrefixWords = 4;
         if (phraseWords.size() < 2 || phraseWords.size() > 12) {
             return;
         }
@@ -646,6 +754,11 @@ void AndroidKeyboardEngine::reloadUserWordsIfNeeded() {
                         }
                     }
                     predictionScores[joinWords(prefixWords, 0, prefixWords.size())][nextWords.front()] += score;
+                } else if (!prefixWords.empty()) {
+                    try {
+                        addPhrasePrediction(prefixWords, std::max(1, std::stoi(parts[1])));
+                    } catch (...) {
+                    }
                 }
                 continue;
             }
@@ -698,7 +811,10 @@ void AndroidKeyboardEngine::reloadUserWordsIfNeeded() {
         readPhrasePredictions(phrasePredictionsFile, 5);
     }
     if (fs::exists(customPhrasePredictionsFile, ec)) {
-        readPhrasePredictions(customPhrasePredictionsFile, 1000000);
+        readPhrasePredictions(customPhrasePredictionsFile, 5);
+    }
+    if (fs::exists(learnedPhrasePredictionsFile, ec)) {
+        readPhrasePredictions(learnedPhrasePredictionsFile, 1);
     }
     if (fs::exists(phraseBooksDir, ec) && fs::is_directory(phraseBooksDir, ec)) {
         std::vector<fs::path> phraseBooks;

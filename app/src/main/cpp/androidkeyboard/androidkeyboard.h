@@ -121,6 +121,7 @@ public:
 private:
     bool supportHint(const std::string &language);
     void reloadUserWordsIfNeeded();
+    void learnPhrasePrediction(InputContext *inputContext, const std::vector<std::string> &words);
     std::vector<std::pair<std::string, std::string>> userWordHints(const std::string &input);
     std::vector<std::pair<std::string, std::string>> customPhraseHints(const std::string &input);
     std::vector<std::pair<std::string, std::string>> phrasePredictionHints(InputContext *inputContext, const std::string &input);

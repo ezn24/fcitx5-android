@@ -437,6 +437,11 @@
     <string name="english_manage_custom_predictions">管理自訂聯想</string>
     <string name="english_custom_prediction_phrase">短語</string>
     <string name="english_custom_prediction_invalid">請輸入 2 到 12 個英文單詞</string>
+    <string name="english_custom_prediction_score">權重</string>
+    <string name="english_custom_prediction_score_hint">輸入短語後會檢查已有聯想權重</string>
+    <string name="english_custom_prediction_score_no_competition">「%1$s」暫無已有聯想。預設 5 已足夠。</string>
+    <string name="english_custom_prediction_score_competition">「%1$s」前 %2$d 權重：%3$s。至少設為 %4$d 可進入前 %2$d。</string>
+    <string name="english_custom_prediction_invalid_score">權重必須是正數</string>
     <string name="english_manage_custom_phrase">管理自訂字詞</string>
     <string name="english_no_imported_dictionaries">沒有已匯入詞庫</string>
     <string name="english_delete_dictionary_title">刪除詞庫</string>
