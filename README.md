@@ -2,14 +2,41 @@
 
 [Fcitx5](https://github.com/fcitx/fcitx5) input method framework and engines ported to Android.
 
-基于原仓几乎全程 vibe coding 而成，在[上游原仓](https://github.com/fxliang/fcitx5-android)上增加了相当若干特性，包名为了方便网友同时使用体验使用改成了`org.fcitx.fcitx5.android.ez`，总体上可以理解成原仓做的超集, 可在[releases](https://github.com/ezn24/fcitx5-android/releases)下面下载体验。
+以[FX](https://github.com/fxliang/fcitx5-android)分支基础进行开发，会融入上游的更新
+全程由Codex编写代码，修改增加了一些特性  
+包名为了方便改成了`org.fcitx.fcitx5.android.ez`
 
-## 修改内容：
-- 为默认英语添加 自定词库 & 自定字词功能
-- 拉取最新 Unicode emoji
+可在[releases](https://github.com/ezn24/fcitx5-android/releases)下面下载体验
+目前暂时只会构建出 Preview relese
+
+## 增加内容：
+
+- 为默认英语
+  - 自定词库
+  - 自定字词功能
+  - 新增单词句子联想（本地，来源于 [Tatoeba](https://downloads.tatoeba.org/exports/sentences.tar.bz2) 和 [Google Books Ngram](https://storage.googleapis.com/books/ngrams/books/20200217)）
+  - 自定联想
+- 拉取最新 Unicode emoji (部分多人emoji没有放入)
 - 改进拼音输入 emoji 的触发 & 添加自定拼音emoji字典的编辑
 
-默认通过 `./gradlew :app:assembleDebug` 等常规命令构建的是带 `.ez` 后缀的 ez 变体（包名 `org.fcitx.fcitx5.android.ez`、界面标题携带 `.ez`、APK 文件名体现 `.ez`、主要输出路径为 `app/build/outputs/apk/fx/<buildType>`，数据目录为 `/Android/data/org.fcitx.fcitx5.android.ez/...`）。同时为了兼容常见脚本，构建后会自动同步一份 APK 到 `app/build/outputs/apk/<buildType>`（不含 `ez/` 这一层）。想要生成与主仓命名一致的 mainline 变体时，可加上 `-PincludeMainlineFlavor=true` 并使用对应的 variant，例如：
+## 构建
+
+```bash
+#构建带 .ez 后缀的变体
+./gradlew :app:assembleDebug
+```
+
+主要输出路径:
+`app/build/outputs/apk/fx/<buildType>`
+
+数据目录:
+`/Android/data/org.fcitx.fcitx5.android.ez/...`
+
+---
+
+同时为了兼容常见脚本，构建后会自动同步一份 APK 到 `app/build/outputs/apk/<buildType>`
+
+想要生成与主仓命名一致的 mainline 变体时，可加上 `-PincludeMainlineFlavor=true` 并使用对应的 variant，例如：
 
 ```
 ./gradlew -PincludeMainlineFlavor=true :app:assembleMainlineDebug
@@ -17,8 +44,6 @@
 ```
 
 mainline 变体会输出无 `.ez` 后缀的包名、应用名、资源以及 APK/日志命名（输出路径为 `app/build/outputs/apk/mainline/<buildType>`，数据目录 `/Android/data/org.fcitx.fcitx5.android/...` 亦跟主仓一致），运行时与 upstream 原仓保持一致；其余构建逻辑与 ez 变体完全相同。
-
-
 
 ## Download
 
@@ -30,6 +55,7 @@ You can also download the **latest CI build** on our Jeninks server: [![build st
 
 > [!NOTE]
 > APKs downloaded from GitHub Release/F-Droid/Jenkins have the same signature, which means they're compatible when upgrading, but Google Play's do not.
+>
 > <details>
 > <summary>(click here for detailed signature info)</summary>
 > <ul>
@@ -81,13 +107,13 @@ In case you want Fcitx5 on other platforms: [macOS](https://github.com/fcitx-con
 
 ## Screenshots
 
-|拼音, Material Light theme, key border enabled|自然码双拼, Pixel Dark theme, key border disabled|
-|:-:|:-:|
-|<img src="https://github.com/fcitx5-android/fcitx5-android/assets/13914967/bd429247-62d9-4c78-bab8-70ef3ce47588" width="360px">|<img src="https://github.com/fcitx5-android/fcitx5-android/assets/13914967/3ae969c1-7ed0-4f92-a5df-19dc8c90a8c3" width="360px">|
+|                                         拼音, Material Light theme, key border enabled                                          |                                        自然码双拼, Pixel Dark theme, key border disabled                                        |
+| :-----------------------------------------------------------------------------------------------------------------------------: | :-----------------------------------------------------------------------------------------------------------------------------: |
+| <img src="https://github.com/fcitx5-android/fcitx5-android/assets/13914967/bd429247-62d9-4c78-bab8-70ef3ce47588" width="360px"> | <img src="https://github.com/fcitx5-android/fcitx5-android/assets/13914967/3ae969c1-7ed0-4f92-a5df-19dc8c90a8c3" width="360px"> |
 
-|Emoji picker, Pixel Light theme, key border enabled|Symbol picker, Material Dark theme, key border disabled|
-|:-:|:-:|
-|<img src="https://user-images.githubusercontent.com/13914967/202181845-6a5f6bb2-a877-468c-851a-fd7e66e64ed4.png" width="360px">|<img src="https://user-images.githubusercontent.com/13914967/202181861-dd253439-1d5e-4f5f-9535-934f28796a6b.png" width="360px">|
+|                                       Emoji picker, Pixel Light theme, key border enabled                                       |                                     Symbol picker, Material Dark theme, key border disabled                                     |
+| :-----------------------------------------------------------------------------------------------------------------------------: | :-----------------------------------------------------------------------------------------------------------------------------: |
+| <img src="https://user-images.githubusercontent.com/13914967/202181845-6a5f6bb2-a877-468c-851a-fd7e66e64ed4.png" width="360px"> | <img src="https://user-images.githubusercontent.com/13914967/202181861-dd253439-1d5e-4f5f-9535-934f28796a6b.png" width="360px"> |
 
 ## Get involved
 
@@ -115,9 +141,9 @@ Discuss on Telegram: [@fcitx5_android_group](https://t.me/fcitx5_android_group) 
 
 - Enable symlink support for `git`:
 
-    ```shell
-    git config --global core.symlinks true
-    ```
+  ```shell
+  git config --global core.symlinks true
+  ```
 
 </details>
 
@@ -169,12 +195,12 @@ The current recommended versions are recorded in [Versions.kt](build-logic/conve
 
 - Android Studio indexing takes forever to complete and cosumes a lot of memory.
 
-    Switch to "Project" view in the "Project" tool window (namely the file tree side bar), right click `lib/fcitx5/src/main/cpp/prebuilt` directory, then select "Mark Directory as > Excluded". You may also need to restart the IDE to interrupt ongoing indexing process.
+  Switch to "Project" view in the "Project" tool window (namely the file tree side bar), right click `lib/fcitx5/src/main/cpp/prebuilt` directory, then select "Mark Directory as > Excluded". You may also need to restart the IDE to interrupt ongoing indexing process.
 
 - Gradle error: "No variants found for ':app'. Check build files to ensure at least one variant exists." or "[CXX1210] <whatever>/CMakeLists.txt debug|arm64-v8a : No compatible library found"
 
-    Examine if there are environment variables set such as `_JAVA_OPTIONS` or `JAVA_TOOL_OPTIONS`. You might want to clear them (maybe in the startup script `studio.sh` of Android Studio), as some gradle plugin treats anything in stderr as errors and aborts.
+  Examine if there are environment variables set such as `_JAVA_OPTIONS` or `JAVA_TOOL_OPTIONS`. You might want to clear them (maybe in the startup script `studio.sh` of Android Studio), as some gradle plugin treats anything in stderr as errors and aborts.
 
 ## Nix
 
-Appropriate Android SDK with NDK is available in the development shell.  The `gradlew` should work out-of-the-box, so you can install the app to your phone with `./gradlew installDebug` after applying the patch mentioned above. For development, you may want to install the unstable version of Android Studio, and point the project SDK path to `$ANDROID_SDK_ROOT` defined in the shell. Notice that Android Studio may generate wrong `local.properties` which sets the SDK location to `~/Android/SDK` (installed by SDK Manager). In such case, you need specify `sdk.dir` as the project SDK in that file manually, in case Android Studio sticks to the wrong global SDK.
+Appropriate Android SDK with NDK is available in the development shell. The `gradlew` should work out-of-the-box, so you can install the app to your phone with `./gradlew installDebug` after applying the patch mentioned above. For development, you may want to install the unstable version of Android Studio, and point the project SDK path to `$ANDROID_SDK_ROOT` defined in the shell. Notice that Android Studio may generate wrong `local.properties` which sets the SDK location to `~/Android/SDK` (installed by SDK Manager). In such case, you need specify `sdk.dir` as the project SDK in that file manually, in case Android Studio sticks to the wrong global SDK.
