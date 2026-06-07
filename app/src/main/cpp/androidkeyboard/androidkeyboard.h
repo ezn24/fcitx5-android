@@ -12,6 +12,7 @@
 #include <fcitx/addonmanager.h>
 #include <fcitx/inputmethodengine.h>
 #include <fcitx/action.h>
+#include <chrono>
 #include <filesystem>
 #include <unordered_map>
 #include <vector>
@@ -122,6 +123,8 @@ private:
     bool supportHint(const std::string &language);
     void reloadUserWordsIfNeeded();
     void learnPhrasePrediction(InputContext *inputContext, const std::vector<std::string> &words);
+    void addPhrasePredictionToCache(const std::string &prefix, const std::string &next, int score);
+    void flushLearnedPhrasePredictions(bool force = false);
     std::vector<std::pair<std::string, std::string>> userWordHints(const std::string &input);
     std::vector<std::pair<std::string, std::string>> customPhraseHints(const std::string &input);
     std::vector<std::pair<std::string, std::string>> phrasePredictionHints(InputContext *inputContext, const std::string &input);
@@ -146,6 +149,9 @@ private:
     };
     std::vector<CustomPhrase> customPhrases_;
     std::unordered_map<std::string, std::vector<PhrasePrediction>> phrasePredictions_;
+    std::unordered_map<std::string, std::unordered_map<std::string, int>> learnedPhrasePredictionScores_;
+    bool learnedPhrasePredictionsDirty_ = false;
+    std::chrono::steady_clock::time_point learnedPhrasePredictionsLastChanged_{};
     std::filesystem::file_time_type userWordsLastModified_{};
 
     FactoryFor<AndroidKeyboardEngineState> factory_{
