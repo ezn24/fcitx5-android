@@ -1,13 +1,12 @@
-# fcitx5-android
+# fcitx5-android-ez
 
-[Fcitx5](https://github.com/fcitx/fcitx5) input method framework and engines ported to Android.
-
-以[FX](https://github.com/fxliang/fcitx5-android)分支基础进行开发，会融入上游的更新
+以 [FX](https://github.com/fxliang/fcitx5-android) 分支基础进行开发，会融入上游的更新
 全程由Codex编写代码，修改增加了一些特性  
+
 包名为了方便改成了`org.fcitx.fcitx5.android.ez`
 
-可在[releases](https://github.com/ezn24/fcitx5-android/releases)下面下载体验
-目前暂时只会构建出 Preview relese
+可在 [releases](https://github.com/ezn24/fcitx5-android/releases) 下面下载体验
+目前暂时只会构建出 Preview release
 
 ## 增加内容：
 
@@ -21,19 +20,16 @@
 - 新增为三星用户设计的音效开关，开启可启用三星键盘的音效
 
 ## 构建
-
-```bash
-#构建带 .ez 后缀的变体
-./gradlew :app:assembleDebug
-```
-
 主要输出路径:
 `app/build/outputs/apk/fx/<buildType>`
 
 数据目录:
 `/Android/data/org.fcitx.fcitx5.android.ez/...`
 
----
+```bash
+#构建带 .ez 后缀的变体
+./gradlew :app:assembleDebug
+```
 
 同时为了兼容常见脚本，构建后会自动同步一份 APK 到 `app/build/outputs/apk/<buildType>`
 
@@ -45,6 +41,12 @@
 ```
 
 mainline 变体会输出无 `.ez` 后缀的包名、应用名、资源以及 APK/日志命名（输出路径为 `app/build/outputs/apk/mainline/<buildType>`，数据目录 `/Android/data/org.fcitx.fcitx5.android/...` 亦跟主仓一致），运行时与 upstream 原仓保持一致；其余构建逻辑与 ez 变体完全相同。
+
+---
+
+# fcitx5-android
+
+[Fcitx5](https://github.com/fcitx/fcitx5) input method framework and engines ported to Android.
 
 ## Download
 
