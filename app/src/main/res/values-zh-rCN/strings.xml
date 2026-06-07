@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="system_sound_file_mode">系统音频文件模式</string>
+    <string name="system_sound_file_mode_summary">提供给三星用户的特殊开关，以使用三星键盘的音效。</string>
     <string name="app_name_release">小企鹅输入法.ez</string>
     <string name="app_name_debug">小企鹅输入法.ez (调试)</string>
     <string name="app_name_mainline_release">小企鹅输入法</string>

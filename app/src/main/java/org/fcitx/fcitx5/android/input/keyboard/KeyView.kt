@@ -97,6 +97,7 @@ abstract class KeyView(
         vMargin = if (def.margin) dp(vMarginPref.getValue()) else 0
         cornerLabelHorizontalSafeInset = dp(3)
         cornerLabelTopSafeInset = dp(1)
+        soundEffect = def.soundEffect
     }
 
     private val cachedLocation = intArrayOf(0, 0)

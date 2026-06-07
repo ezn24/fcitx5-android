@@ -5,6 +5,8 @@
 package org.fcitx.fcitx5.android.data
 
 import android.media.AudioManager
+import android.media.AudioAttributes
+import android.media.SoundPool
 import android.os.Build
 import android.os.VibrationEffect
 import android.provider.Settings
@@ -17,6 +19,8 @@ import org.fcitx.fcitx5.android.utils.appContext
 import org.fcitx.fcitx5.android.utils.audioManager
 import org.fcitx.fcitx5.android.utils.getSystemSettings
 import org.fcitx.fcitx5.android.utils.vibrator
+import java.io.File
+import java.util.concurrent.ConcurrentHashMap
 
 object InputFeedbacks {
 
@@ -41,6 +45,7 @@ object InputFeedbacks {
 
     private val soundOnKeyPress by keyboardPrefs.soundOnKeyPress
     private val soundOnKeyPressVolume by keyboardPrefs.soundOnKeyPressVolume
+    private val systemSoundFileMode by keyboardPrefs.systemSoundFileMode
     private val hapticOnKeyPress by keyboardPrefs.hapticOnKeyPress
     private val hapticOnKeyUp by keyboardPrefs.hapticOnKeyUp
     private val buttonPressVibrationMilliseconds by keyboardPrefs.buttonPressVibrationMilliseconds
@@ -136,10 +141,97 @@ object InputFeedbacks {
     }
 
     enum class SoundEffect {
-        Standard, SpaceBar, Delete, Return
+        Standard, Modifier, SpaceBar, Delete, Return
     }
 
     private val audioManager = appContext.audioManager
+
+    private val systemSoundPool by lazy {
+        SoundPool.Builder()
+            .setMaxStreams(4)
+            .setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_ASSISTANCE_SONIFICATION)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                    .build()
+            )
+            .build()
+            .apply {
+                setOnLoadCompleteListener { _, sampleId, status ->
+                    systemSoundLoaded[sampleId] = status == 0
+                }
+            }
+    }
+
+    private val systemSoundLoaded = ConcurrentHashMap<Int, Boolean>()
+    private val systemSoundIds = mutableMapOf<SoundEffect, Int>()
+
+    private val systemSoundPaths = mapOf(
+        SoundEffect.Standard to listOf(
+            "/system/media/audio/ui/TW_SIP.ogg",
+            "/system/media/audio/ui/KeypressStandard.ogg"
+        ),
+        SoundEffect.Modifier to listOf(
+            "/system/media/audio/ui/SIP_Modifier.ogg",
+            "/system/media/audio/ui/TW_SIP.ogg",
+            "/system/media/audio/ui/KeypressStandard.ogg"
+        ),
+        SoundEffect.SpaceBar to listOf(
+            "/system/media/audio/ui/SIP_Modifier.ogg",
+            "/system/media/audio/ui/KeypressSpacebar.ogg",
+            "/system/media/audio/ui/TW_SIP.ogg",
+            "/system/media/audio/ui/KeypressStandard.ogg"
+        ),
+        SoundEffect.Delete to listOf(
+            "/system/media/audio/ui/S_SIP_Backspace.ogg",
+            "/system/media/audio/ui/KeypressDelete.ogg"
+        ),
+        SoundEffect.Return to listOf(
+            "/system/media/audio/ui/SIP_Modifier.ogg",
+            "/system/media/audio/ui/KeypressReturn.ogg"
+        )
+    )
+
+    private fun audioManagerFx(effect: SoundEffect) = when (effect) {
+        SoundEffect.Standard -> AudioManager.FX_KEYPRESS_STANDARD
+        SoundEffect.Modifier -> AudioManager.FX_KEYPRESS_STANDARD
+        SoundEffect.SpaceBar -> AudioManager.FX_KEYPRESS_SPACEBAR
+        SoundEffect.Delete -> AudioManager.FX_KEYPRESS_DELETE
+        SoundEffect.Return -> AudioManager.FX_KEYPRESS_RETURN
+    }
+
+    private fun volume() = soundOnKeyPressVolume.let {
+        if (it == 0) -1f else it / 100f
+    }
+
+    private fun playAudioManagerSound(effect: SoundEffect) {
+        val fx = audioManagerFx(effect)
+        val volume = volume()
+        if (volume < 0f) {
+            audioManager.playSoundEffect(fx, -1f)
+        } else {
+            audioManager.playSoundEffect(fx, volume)
+        }
+    }
+
+    private fun systemSoundId(effect: SoundEffect): Int? {
+        systemSoundIds[effect]?.let { return it }
+        val path = systemSoundPaths[effect]
+            ?.firstOrNull { File(it).canRead() }
+            ?: return null
+        return systemSoundPool.load(path, 1).takeIf { it != 0 }?.also {
+            systemSoundIds[effect] = it
+            systemSoundLoaded[it] = false
+        }
+    }
+
+    private fun playSystemSoundFile(effect: SoundEffect): Boolean {
+        val soundId = systemSoundId(effect) ?: return false
+        if (systemSoundLoaded[soundId] != true) return false
+        val volume = volume().takeIf { it >= 0f } ?: 1f
+        systemSoundPool.play(soundId, volume, volume, 1, 0, 1f)
+        return true
+    }
 
     fun soundEffect(effect: SoundEffect) {
         when (soundOnKeyPress) {
@@ -147,18 +239,10 @@ object InputFeedbacks {
             InputFeedbackMode.Disabled -> return
             InputFeedbackMode.FollowingSystem -> if (!systemSoundEffects) return
         }
-        val fx = when (effect) {
-            SoundEffect.Standard -> AudioManager.FX_KEYPRESS_STANDARD
-            SoundEffect.SpaceBar -> AudioManager.FX_KEYPRESS_SPACEBAR
-            SoundEffect.Delete -> AudioManager.FX_KEYPRESS_DELETE
-            SoundEffect.Return -> AudioManager.FX_KEYPRESS_RETURN
+        if (systemSoundFileMode && playSystemSoundFile(effect)) {
+            return
         }
-        val volume = soundOnKeyPressVolume
-        if (volume == 0) {
-            audioManager.playSoundEffect(fx, -1f)
-        } else {
-            audioManager.playSoundEffect(fx, volume / 100f)
-        }
+        playAudioManagerSound(effect)
     }
 
 }

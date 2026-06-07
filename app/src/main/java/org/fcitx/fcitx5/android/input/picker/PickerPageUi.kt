@@ -14,6 +14,7 @@ import androidx.core.view.updateLayoutParams
 import org.fcitx.fcitx5.android.R
 import org.fcitx.fcitx5.android.core.FcitxKeyMapping
 import org.fcitx.fcitx5.android.core.KeySym
+import org.fcitx.fcitx5.android.data.InputFeedbacks
 import org.fcitx.fcitx5.android.data.prefs.AppPrefs
 import org.fcitx.fcitx5.android.data.theme.Theme
 import org.fcitx.fcitx5.android.input.AutoScaleTextView
@@ -110,7 +111,8 @@ class PickerPageUi(
         src = R.drawable.ic_baseline_backspace_24,
         variant = Variant.Alternative,
         border = if (bordered) Border.On else Border.Off,
-        viewId = R.id.button_backspace
+        viewId = R.id.button_backspace,
+        soundEffect = InputFeedbacks.SoundEffect.Delete
     )
 
     private val backspaceKey by lazy {

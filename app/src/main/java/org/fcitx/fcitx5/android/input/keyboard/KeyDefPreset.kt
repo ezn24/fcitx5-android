@@ -221,6 +221,7 @@ class LayoutSwitchKey(
             variant = variant,
             border = Border.Special,
             viewId = R.id.button_layout_switch,
+            soundEffect = InputFeedbacks.SoundEffect.Modifier,
             textColor = textColor,
             textColorMonet = textColorMonet,
             backgroundColor = backgroundColor,
@@ -239,6 +240,7 @@ class LayoutSwitchKey(
             variant = variant,
             border = Border.Special,
             viewId = R.id.button_layout_switch,
+            soundEffect = InputFeedbacks.SoundEffect.Modifier,
             textColor = textColor,
             textColorMonet = textColorMonet,
             backgroundColor = backgroundColor,
@@ -506,7 +508,8 @@ class ImageLayoutSwitchKey(
         src = icon,
         percentWidth = percentWidth,
         variant = variant,
-        viewId = viewId
+        viewId = viewId,
+        soundEffect = InputFeedbacks.SoundEffect.Modifier
     ),
     setOf(
         Behavior.Press(KeyAction.LayoutSwitchAction(to))
@@ -525,7 +528,8 @@ class ImagePickerSwitchKey(
         src = icon,
         percentWidth = percentWidth,
         variant = variant,
-        viewId = viewId
+        viewId = viewId,
+        soundEffect = InputFeedbacks.SoundEffect.Modifier
     ),
     setOf(
         Behavior.Press(KeyAction.PickerSwitchAction(to))
@@ -545,7 +549,8 @@ class TextPickerSwitchKey(
         percentWidth = percentWidth,
         variant = variant,
         viewId = viewId,
-        textStyle = Typeface.BOLD
+        textStyle = Typeface.BOLD,
+        soundEffect = InputFeedbacks.SoundEffect.Modifier
     ),
     setOf(
         Behavior.Press(KeyAction.PickerSwitchAction(to))

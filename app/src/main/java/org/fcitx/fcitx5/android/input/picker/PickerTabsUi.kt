@@ -8,6 +8,7 @@ import android.content.Context
 import android.graphics.Typeface
 import androidx.annotation.DrawableRes
 import androidx.core.view.isVisible
+import org.fcitx.fcitx5.android.data.InputFeedbacks
 import org.fcitx.fcitx5.android.data.theme.Theme
 import org.fcitx.fcitx5.android.data.theme.ThemeManager
 import org.fcitx.fcitx5.android.input.keyboard.CustomGestureView
@@ -51,6 +52,7 @@ class PickerTabsUi(override val ctx: Context, val theme: Theme) : Ui {
         val icon = imageView()
 
         override val root = view(::CustomGestureView) {
+            soundEffect = InputFeedbacks.SoundEffect.Modifier
             add(label, lParams {
                 gravity = gravityCenter
             })

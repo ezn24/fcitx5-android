@@ -156,6 +156,14 @@ class AppPrefs(private val sharedPreferences: SharedPreferences) {
         ) {
             soundOnKeyPress.getValue() != InputFeedbackMode.Disabled
         }
+        val systemSoundFileMode = switch(
+            R.string.system_sound_file_mode,
+            "system_sound_file_mode",
+            false,
+            R.string.system_sound_file_mode_summary
+        ) {
+            soundOnKeyPress.getValue() != InputFeedbackMode.Disabled
+        }
         val focusChangeResetKeyboard =
             switch(R.string.reset_keyboard_on_focus_change, "reset_keyboard_on_focus_change", true)
         val expandToolbarByDefault =

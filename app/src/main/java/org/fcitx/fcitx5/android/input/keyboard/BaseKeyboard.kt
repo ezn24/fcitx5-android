@@ -25,6 +25,7 @@ import androidx.lifecycle.findViewTreeLifecycleOwner
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import org.fcitx.fcitx5.android.R
 import org.fcitx.fcitx5.android.core.FcitxKeyMapping
 import org.fcitx.fcitx5.android.core.InputMethodEntry
 import org.fcitx.fcitx5.android.core.KeyState
@@ -700,13 +701,7 @@ abstract class BaseKeyboard(
             is KeyDef.Appearance.Image -> ImageKeyView(context, theme, activeAppearance, horizontalGapScale)
         }.apply {
             setTextScale(currentTextScale)
-            soundEffect = when (def) {
-                is SpaceKey -> InputFeedbacks.SoundEffect.SpaceBar
-                is MiniSpaceKey -> InputFeedbacks.SoundEffect.SpaceBar
-                is BackspaceKey -> InputFeedbacks.SoundEffect.Delete
-                is ReturnKey -> InputFeedbacks.SoundEffect.Return
-                else -> InputFeedbacks.SoundEffect.Standard
-            }
+            soundEffect = soundEffectFor(def, activeAppearance)
             if (def is SpaceKey) {
                 spaceKeys.add(this)
                 swipeEnabled = spaceSwipeMoveCursor.getValue()
@@ -818,6 +813,55 @@ abstract class BaseKeyboard(
                 composeAwareKeys += ComposeAwareKey(def, this, baseline)
             }
         }
+    }
+
+    private fun soundEffectFor(
+        def: KeyDef,
+        appearance: KeyDef.Appearance
+    ): InputFeedbacks.SoundEffect {
+        return when {
+            def is SpaceKey || def is MiniSpaceKey || hasSymAction(def, FcitxKeyMapping.FcitxKey_space) ->
+                InputFeedbacks.SoundEffect.SpaceBar
+            def is BackspaceKey ||
+                    appearance.viewId == R.id.button_backspace ||
+                    hasSymAction(def, FcitxKeyMapping.FcitxKey_BackSpace) ->
+                InputFeedbacks.SoundEffect.Delete
+            def is ReturnKey ||
+                    appearance.viewId == R.id.button_return ||
+                    hasSymAction(def, FcitxKeyMapping.FcitxKey_Return) ->
+                InputFeedbacks.SoundEffect.Return
+            hasModifierAction(def) -> InputFeedbacks.SoundEffect.Modifier
+            else -> appearance.soundEffect
+        }
+    }
+
+    private fun hasSymAction(def: KeyDef, sym: Int): Boolean {
+        return def.behaviors.any { behavior ->
+            val action = behavior.actionOrNull() ?: return@any false
+            action is KeyAction.SymAction && action.sym.sym == sym
+        }
+    }
+
+    private fun hasModifierAction(def: KeyDef): Boolean {
+        return def.behaviors.any { behavior ->
+            when (behavior.actionOrNull()) {
+                is KeyAction.CapsAction,
+                is KeyAction.LangSwitchAction,
+                is KeyAction.LayoutSwitchAction,
+                is KeyAction.LayerSwitchAction,
+                is KeyAction.PickerSwitchAction,
+                is KeyAction.ShowInputMethodPickerAction -> true
+                else -> false
+            }
+        }
+    }
+
+    private fun KeyDef.Behavior.actionOrNull(): KeyAction? = when (this) {
+        is KeyDef.Behavior.Press -> action
+        is KeyDef.Behavior.LongPress -> action
+        is KeyDef.Behavior.Repeat -> action
+        is KeyDef.Behavior.Swipe -> action
+        is KeyDef.Behavior.DoubleTap -> action
     }
 
     open fun onCompositionStateChanged(composing: Boolean) {
