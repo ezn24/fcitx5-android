@@ -5,12 +5,13 @@
 package org.fcitx.fcitx5.android.core
 
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CancellableContinuation
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import java.util.concurrent.ConcurrentLinkedQueue
-import kotlin.coroutines.Continuation
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.coroutines.CoroutineContext
 import kotlin.coroutines.resume
 
@@ -127,19 +128,30 @@ fun <T> FcitxLifecycle.launchWhenStopped(block: suspend CoroutineScope.() -> T) 
 
 private class AtStateHelper(val lifecycle: FcitxLifecycle, val state: FcitxLifecycle.State) {
     private val observer = FcitxLifecycleObserver {
-        if (lifecycle.currentState == state)
-            continuation?.resume(Unit)
+        resumeIfReady()
     }
 
-    init {
-        lifecycle.addObserver(observer)
-    }
+    private val resumed = AtomicBoolean(false)
+    private var continuation: CancellableContinuation<Unit>? = null
 
-    private var continuation: Continuation<Unit>? = null
+    private fun resumeIfReady() {
+        if (lifecycle.currentState != state || !resumed.compareAndSet(false, true)) return
+        val cont = continuation ?: return
+        continuation = null
+        lifecycle.removeObserver(observer)
+        cont.resume(Unit)
+    }
 
     suspend fun <T> run(block: suspend CoroutineScope.() -> T): T {
-        suspendCancellableCoroutine { continuation = it }
-        lifecycle.removeObserver(observer)
+        suspendCancellableCoroutine { cont ->
+            continuation = cont
+            lifecycle.addObserver(observer)
+            cont.invokeOnCancellation {
+                continuation = null
+                lifecycle.removeObserver(observer)
+            }
+            resumeIfReady()
+        }
         return block(lifecycle.lifecycleScope)
     }
 }
