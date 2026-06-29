@@ -33,7 +33,9 @@ import org.fcitx.fcitx5.android.input.keyboard.KeyAction.ShowInputMethodPickerAc
 import org.fcitx.fcitx5.android.input.keyboard.KeyAction.SpaceLongPressAction
 import org.fcitx.fcitx5.android.input.keyboard.KeyAction.SymAction
 import org.fcitx.fcitx5.android.input.keyboard.KeyAction.UnicodeAction
+import org.fcitx.fcitx5.android.input.keyboard.KeyAction.VoiceInputHoldEnd
 import org.fcitx.fcitx5.android.input.picker.PickerWindow
+import org.fcitx.fcitx5.android.input.voice.VoiceInputProviderManager
 import org.fcitx.fcitx5.android.input.wm.InputWindowManager
 import org.fcitx.fcitx5.android.utils.InputMethodUtil
 import org.fcitx.fcitx5.android.utils.switchToNextIME
@@ -67,6 +69,8 @@ class CommonKeyActionListener :
 
     private var backspaceSwipeState = Stopped
 
+    private var voiceHoldActive = false
+
     // there should be a new fcitx API for this
     private suspend fun FcitxAPI.commitAndReset() {
         if (inputMethodEntryCached.languageCode.startsWith("zh")) {
@@ -92,13 +96,36 @@ class CommonKeyActionListener :
         }
     }
 
-    private fun switchToVoiceInput() {
+    private fun switchToVoiceInput(): Boolean {
         val isPasswordField = service.currentInputEditorInfo?.let {
             CapabilityFlags.fromEditorInfo(it).has(CapabilityFlag.Password)
         } ?: false
-        if (isPasswordField) return
-        val (id, subtype) = InputMethodUtil.findVoiceSubtype(preferredVoiceInput) ?: return
+        if (isPasswordField) return false
+        if (VoiceInputProviderManager.isProviderId(preferredVoiceInput)) {
+            return VoiceInputProviderManager.toggle(
+                service = service,
+                id = preferredVoiceInput,
+                onReady = {
+                    VoiceInputProviderManager.voiceReadyCallback?.invoke()
+                },
+                onPartialResult = {},
+                onError = { msg ->
+                    VoiceInputProviderManager.voiceErrorCallback?.invoke(msg)
+                },
+                onLevel = { rms ->
+                    VoiceInputProviderManager.voiceLevelCallback?.invoke(rms)
+                },
+                onFinished = {
+                    VoiceInputProviderManager.voiceFinishedCallback?.invoke()
+                },
+                onStatus = { status ->
+                    VoiceInputProviderManager.voiceStatusCallback?.invoke(status)
+                },
+            )
+        }
+        val (id, subtype) = InputMethodUtil.findVoiceSubtype(preferredVoiceInput) ?: return false
         InputMethodUtil.switchInputMethod(service, id, subtype)
+        return true
     }
 
     val listener by lazy {
@@ -196,7 +223,19 @@ class CommonKeyActionListener :
                             toggleIme()
                         }
                         SpaceLongPressBehavior.ShowPicker -> showInputMethodPicker()
-                        SpaceLongPressBehavior.VoiceInput -> switchToVoiceInput()
+                        SpaceLongPressBehavior.VoiceInput -> { switchToVoiceInput() }
+                        SpaceLongPressBehavior.VoiceInputHold -> {
+                            val started = switchToVoiceInput()
+                            if (VoiceInputProviderManager.isProviderId(preferredVoiceInput)) {
+                                voiceHoldActive = started
+                            }
+                        }
+                    }
+                }
+                is VoiceInputHoldEnd -> {
+                    if (voiceHoldActive) {
+                        switchToVoiceInput()
+                        voiceHoldActive = false
                     }
                 }
                 else -> {}

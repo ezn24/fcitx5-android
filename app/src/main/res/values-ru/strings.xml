@@ -71,6 +71,11 @@
     <string name="clipboard">Буфер обмена</string>
     <string name="keyboard_height">Высота клавиатуры</string>
     <string name="virtual_keyboard">Виртуальная клавиатура</string>
+    <string name="keyboard_category_layout">Раскладка и размер</string>
+    <string name="keyboard_category_behavior">Поведение клавиш</string>
+    <string name="keyboard_category_feedback">Отклик клавиш</string>
+    <string name="keyboard_category_toolbar">Панель и кандидаты</string>
+    <string name="keyboard_category_editors">Дополнительно</string>
     <string name="one_handed_keyboard">Одноручная клавиатура</string>
     <string name="clipboard_suggestion_timeout">Тайм-аут предложения буфера обмена</string>
     <string name="version">Версия</string>
@@ -137,6 +142,7 @@
     <string name="punctuation_position">Позиция пунктуации</string>
     <string name="punctuation_pos_bottom">Внизу</string>
     <string name="punctuation_pos_top_right">В правом верхнем углу</string>
+    <string name="punctuation_pos_top_center">Сверху по центру</string>
     <string name="punctuation_pos_none">Нет</string>
     <string name="expand_toolbar_by_default">Развернуть панель инструментов по умолчанию</string>
     <string name="popup_on_key_press">Всплывающее окно при нажатии клавиши</string>
@@ -222,6 +228,7 @@
     <string name="space_behavior_activate">Переключить состояние активации метода ввода</string>
     <string name="space_behavior_picker">Показать диалоговое окно выбора метода ввода</string>
     <string name="space_behavior_voice_input">Переключиться на голосовой ввод</string>
+    <string name="space_behavior_voice_input_hold">Voice input (hold to talk)</string>
     <string name="show_lang_switch_key">Показываать клавишу переключения языка</string>
     <string name="horizontal_candidate_style">Горизонтальный стиль кандидата</string>
     <string name="horizontal_candidate_never_fill">Никогда не заполнять ширину</string>
@@ -348,8 +355,7 @@
     <string name="hide_unsupported_emojis">Скрыть неподдерживаемые эмодзи</string>
     <string name="key_border_stroke">Включить обводку для границы клавиши</string>
     <string name="special_key_oval_shape">Использовать клавиши действий в стиле Gboard</string>
-    <string name="edit_popup_preset">Редактировать предустановку всплывающих окон</string>
-    <string name="edit_popup_preset_summary">Редактировать сопоставление клавиш всплывающих окон (клавиша -&gt; кандидаты всплывающих окон)</string>
+    <string name="edit_popup_preset">Настройки popup-символов</string>
     <string name="edit_buttons">Редактировать кнопки</string>
     <string name="edit_buttons_summary">Настройка кнопок в Kawaii Bar и Status Area</string>
     <string name="buttons_customizer_hint">Перетаскивайте кнопки для изменения порядка или перемещения между Kawaii Bar (верхняя строка) и Status Area (меню). Долгое нажатие для начала перетаскивания.</string>
@@ -363,6 +369,16 @@
     <string name="floating_keyboard">Плавающая клавиатура</string>
     <string name="adjusting_mode_confirm">Готово</string>
     <string name="edit_button_title">Редактировать кнопку</string>
+    <string name="edit_button_label_id">ид</string>
+    <string name="edit_button_label_text">текст</string>
+    <string name="edit_button_label_label">метка</string>
+    <string name="edit_button_hint_id">уникальный идентификатор</string>
+    <string name="edit_button_hint_text">эмодзи или символ вместо значка</string>
+    <string name="edit_button_pick_icon">Выбрать значок</string>
+    <string name="edit_button_macro">Макрос</string>
+    <string name="edit_button_no_custom_icon">(нет своего значка)</string>
+    <string name="edit_button_macro_event_type">Действие кнопки</string>
+    <string name="edit_button_new_custom">Новая своя кнопка…</string>
     <string name="delete_button_title">Удалить кнопку</string>
     <string name="delete_button_confirm">Удалить эту кнопку?</string>
     <string name="popup_editor_hint">Нажмите на элемент, чтобы редактировать. Долгое нажатие для удаления.</string>
@@ -378,7 +394,7 @@
     <string name="popup_editor_add_candidate">Добавить кандидата</string>
     <string name="popup_editor_add_candidate_button">Добавить</string>
     <string name="popup_editor_candidate_input_hint">Введите значение кандидата</string>
-    <string name="edit_text_keyboard_layout">Редактировать раскладку текстовой клавиатуры</string>
+    <string name="edit_text_keyboard_layout">Изменить раскладку</string>
     <string name="text_keyboard_layout_preview">Предпросмотр</string>
     <string name="ok">ОК</string>
     <string name="cancel">Отмена</string>
@@ -435,8 +451,15 @@
     <string name="text_keyboard_layout_display_text_mode_invalid">Заполните строку %1$d перед добавлением нового режима</string>
     <string name="text_keyboard_layout_display_text_mode_duplicate">Имя режима "%1$s" уже используется</string>
     <string name="cannot_resolve_text_keyboard_layout">Не удалось определить файл раскладки текстовой клавиатуры</string>
-    <string name="edit_text_keyboard_layout_summary_with_file">Редактировать раскладку текстовой клавиатуры (%1$s)</string>
     <string name="text_keyboard_layout_file_select_title">Файл раскладки текстовой клавиатуры</string>
+    <string name="web_editor_bridge_title">Онлайн-редактор</string>
+    <string name="web_editor_bridge_summary">Запустить локальный сервер для редактирования в браузере</string>
+    <string name="web_editor_bridge_running_message">Сервер запущен.\n\nРедактор:\n%1$s\n\nAPI:\n%2$s</string>
+    <string name="web_editor_bridge_running_status">Запущен · %1$s:%2$d</string>
+    <string name="web_editor_bridge_running_indicator">🟢 Онлайн-редактор запущен</string>
+    <string name="web_editor_bridge_start_failed">Не удалось запустить сервер: %1$s</string>
+    <string name="web_editor_bridge_open">Открыть страницу редактора</string>
+    <string name="web_editor_bridge_stop">Остановить сервер</string>
     <string name="text_keyboard_layout_file_select_summary">Текущий файл: %1$s</string>
     <string name="text_keyboard_layout_file_switch">Переключить файл раскладки</string>
     <string name="text_keyboard_layout_file_create">Создать файл раскладки</string>
@@ -626,28 +649,22 @@
 
     <!-- Auto-completed missing strings (fallback to zh-CN/en) -->
     <string name="cannot_resolve_popup_preset">Не удалось найти файл предустановки всплывающих окон</string>
-    <string name="edit_fontset">Редактировать набор шрифтов</string>
-    <string name="edit_fontset_summary">Редактировать fonts/fontset.json и просмотреть комбинацию шрифтов</string>
-    <string name="edit_text_keyboard_layout_summary">Редактировать раскладку текстовой клавиатуры (TextKeyboardLayout.json)</string>
-    <string name="fontset_editor_hint">Нажмите на каждый элемент, чтобы выбрать один или несколько шрифтов из каталога fonts. Несколько шрифтов будут использоваться как резервные в указанном порядке.</string>
+    <string name="edit_fontset">Настройки шрифтов</string>
+    <string name="fontset_editor_hint">Выберите несколько шрифтов для резервного порядка, перетащите для сортировки</string>
     <string name="fontset_entry_candidate">Шрифт кандидатов</string>
     <string name="fontset_entry_font">Базовый шрифт</string>
     <string name="fontset_entry_key_alt">Вторичный шрифт клавиш</string>
     <string name="fontset_entry_key_main">Основной шрифт клавиш</string>
     <string name="fontset_entry_popup_key">Шрифт всплывающей клавиши</string>
     <string name="fontset_entry_preedit">Шрифт предредактирования</string>
-    <string name="fontset_saved">fontset.json сохранён</string>
-    <string name="fontset_saved_at">fontset.json сохранён в: %1$s</string>
+    <string name="fontset_saved_at">Сохранено</string>
     <string name="no_fonts_found">Файлы шрифтов не найдены в fonts/</string>
-    <string name="popup_preset_saved_at">popuppreset.json сохранён в: %1$s</string>
+    <string name="popup_preset_saved_at">Сохранено</string>
     <string name="preferred_voice_input">Предпочтительный голосовой ввод</string>
-    <string name="split_keyboard_calibration_summary">Визуальный просмотр и настройка раздельной клавиатуры с автоподбором и поддержкой складных экранов</string>
     <string name="split_keyboard_calibration_title">Калибровка раздельной клавиатуры</string>
-    <string name="split_keyboard_enabled">Включить автоматическую раздельную клавиатуру</string>
-    <string name="split_keyboard_enabled_summary">Автоматически включать раздельную клавиатуру в зависимости от ширины. В выключенном состоянии всегда используется полная клавиатура.</string>
+    <string name="split_keyboard_enabled">Авто-разделение клавиатуры</string>
     <string name="split_keyboard_threshold">Порог раздельной клавиатуры</string>
     <string name="split_keyboard_use_landscape_layout">Использовать параметры альбомной ориентации при раздельной клавиатуре</string>
-    <string name="split_keyboard_use_landscape_layout_summary">При включении и активной раздельной клавиатуре использовать параметры альбомной ориентации (высота, отступы и т.д.). Доступно только при включённой автоматической раздельной клавиатуре.</string>
     <string name="text_keyboard_layout_file_delete">Удалить файл раскладки</string>
     <string name="text_keyboard_layout_file_delete_confirm">Подтвердить удаление файла раскладки «%1$s» и его резервных копий?</string>
     <string name="text_keyboard_layout_file_delete_failed">Не удалось удалить файл раскладки</string>
@@ -707,4 +724,30 @@
     <string name="share_receive_archive_action_extract">Распаковать в выбранную папку</string>
     <string name="share_receive_archive_action_import_file">Импортировать как файлы</string>
     <string name="share_receive_archive_extracted">Распаковано файлов: %1$d в %2$s.</string>
-    </resources>
+
+    <string name="voice_status_connecting">Подключение…</string>
+    <string name="voice_status_opening">Запуск…</string>
+    <string name="voice_status_loading">Загрузка…</string>
+    <string name="voice_status_floating_ready">Готово</string>
+    <string name="voice_status_recognizing">Распознавание</string>
+    <string name="voice_status_listening">Прослушивание</string>
+    <string name="voice_status_committed">Готово</string>
+
+    <!-- Voice input error toasts -->
+    <string name="voice_error_no_permission">Разрешение RECORD_AUDIO не предоставлено</string>
+    <string name="voice_error_failed">Ошибка голосового ввода</string>
+    <string name="voice_error_invalid_provider">Недопустимый провайдер голосового ввода</string>
+    <string name="voice_error_not_available">Провайдер голосового ввода недоступен</string>
+    <string name="voice_error_disconnected">Провайдер голосового ввода отключен</string>
+    <string name="voice_error_null_binding">Провайдер голосового ввода вернул пустую привязку</string>
+    <string name="voice_error_cannot_bind">Не удалось привязать провайдер голосового ввода</string>
+    <string name="voice_error_bind_timeout">Тайм-аут привязки провайдера голосового ввода</string>
+    <string name="voice_error_call_failed">Ошибка вызова провайдера голосового ввода</string>
+    <string name="voice_error_audio_minbuf">AudioRecord.getMinBufferSize=%d</string>
+    <string name="voice_error_audio_construct">AudioRecord создание запрещено: %s</string>
+    <string name="voice_error_audio_not_init">AudioRecord не инициализирован</string>
+    <string name="voice_error_audio_start_failed">Ошибка начала записи: %s</string>
+        <string name="macro_editor_table_input_methods">Табличный ввод</string>
+    <string name="macro_editor_pinyin_custom_phrase">Пользовательские фразы пиньинь</string>
+    <string name="macro_editor_pinyin_dict">Словарь пиньинь</string>
+</resources>

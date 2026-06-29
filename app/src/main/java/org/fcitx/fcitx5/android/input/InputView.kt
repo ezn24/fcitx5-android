@@ -21,6 +21,7 @@ import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.LayerDrawable
 import android.graphics.Paint
 import android.graphics.RenderEffect
+import android.graphics.RenderNode
 import android.graphics.Shader
 import androidx.core.content.ContextCompat
 import android.graphics.Outline
@@ -104,7 +105,6 @@ import splitties.views.dsl.core.add
 import splitties.views.dsl.core.imageView
 import splitties.views.dsl.core.matchParent
 import splitties.views.dsl.core.view
-import splitties.views.dsl.core.withTheme
 import splitties.views.dsl.core.wrapContent
 import splitties.views.backgroundColor
 import splitties.views.imageDrawable
@@ -132,7 +132,7 @@ class InputView(
         private val clipRect = Rect()
         private val clipRectF = RectF()
         private val clipPath = Path()
-        private val containerLoc = IntArray(2)
+        private val selfLoc = IntArray(2)
         private val keyLoc = IntArray(2)
         private val blurTargetViews = ArrayList<View>(128)
         private val keyClipRects = ArrayList<Rect>(96)
@@ -142,6 +142,28 @@ class InputView(
         private var keyRegionsDirty = true
         private var keyHierarchyDirty = true
         private var hasVisibleKey = false
+        /**
+         * RenderNode that records a single drawBitmap(sourceBitmap) and carries the blur RenderEffect.
+         * Drawing this node onto a hardware canvas yields the GPU-blurred full-screen image; clipping
+         * the canvas first then drawing the node produces "blur-then-hard-clip" semantics that match
+         * the pre-GPU CPU path (loadBlurredBitmapForRendering + clipPath + drawBitmap).
+         */
+        private var blurNode: RenderNode? = null
+        private var blurNodeDirty = true
+        private var hasRenderEffect = false
+
+        @RequiresApi(Build.VERSION_CODES.S)
+        private fun obtainBlurNode(): RenderNode {
+            return blurNode ?: RenderNode("keyBlur").also { blurNode = it }
+        }
+
+        private fun discardBlurNode() {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                blurNode?.discardDisplayList()
+            }
+            blurNode = null
+            blurNodeDirty = true
+        }
 
         fun setBlurBitmap(
             bitmap: Bitmap?,
@@ -152,13 +174,19 @@ class InputView(
             blurBitmap = bitmap
             paint.colorFilter = bitmap?.let { DarkenColorFilter(100 - brightness) }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                setRenderEffect(
-                    if (useRenderEffect && bitmap != null && blurRadius > 0f) {
+                // The view itself never carries a RenderEffect; the blur lives on the offscreen node
+                // so we can clip after the blur, not before it.
+                setRenderEffect(null)
+                hasRenderEffect = useRenderEffect && bitmap != null && blurRadius > 0f
+                if (hasRenderEffect) {
+                    val node = obtainBlurNode()
+                    node.setRenderEffect(
                         RenderEffect.createBlurEffect(blurRadius, blurRadius, Shader.TileMode.CLAMP)
-                    } else {
-                        null
-                    }
-                )
+                    )
+                    blurNodeDirty = true
+                } else {
+                    discardBlurNode()
+                }
             }
             visibility = if (bitmap == null) GONE else VISIBLE
             keyRegionsDirty = true
@@ -187,14 +215,11 @@ class InputView(
                 redrawRetryCount = 0
                 return
             }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                setRenderEffect(null)
-            }
 
             val currentWindow = windowManager.currentWindowOrNull()
             if (currentWindow is PickerWindow && currentWindow.key == PickerWindow.Key.Emoji) {
                 // Emoji pager contains large non-key areas; use full-layer blur to avoid transparent gaps.
-                canvas.drawBitmap(bitmap, srcRect, dstRect, paint)
+                drawFullScreenBlur(canvas, bitmap)
                 redrawRetryCount = 0
                 return
             }
@@ -215,7 +240,7 @@ class InputView(
                 } else {
                     canvas.clipRect(rect)
                 }
-                canvas.drawBitmap(bitmap, srcRect, dstRect, paint)
+                drawFullScreenBlur(canvas, bitmap)
                 canvas.restoreToCount(saveId)
                 drewKeyRegion = true
             }
@@ -233,7 +258,7 @@ class InputView(
                 if (clipRect.intersect(0, 0, width, height)) {
                     val saveId = canvas.save()
                     canvas.clipRect(clipRect)
-                    canvas.drawBitmap(bitmap, srcRect, dstRect, paint)
+                    drawFullScreenBlur(canvas, bitmap)
                     canvas.restoreToCount(saveId)
                 }
             }
@@ -248,12 +273,12 @@ class InputView(
                 if (clipRect.intersect(0, 0, width, height)) {
                     val saveId = canvas.save()
                     canvas.clipRect(clipRect)
-                    canvas.drawBitmap(bitmap, srcRect, dstRect, paint)
+                    drawFullScreenBlur(canvas, bitmap)
                     canvas.restoreToCount(saveId)
                 }
             }
 
-            if (hasVisibleKey && !drewKeyRegion) {
+            if (hasVisibleKey && !drewKeyRegion && keyClipRects.isEmpty()) {
                 if (redrawRetryCount < 8) {
                     redrawRetryCount++
                     keyRegionsDirty = true
@@ -261,6 +286,31 @@ class InputView(
                 }
             } else {
                 redrawRetryCount = 0
+            }
+        }
+
+        /**
+         * Draws the source bitmap onto [canvas], passing it through the GPU blur on API ≥ S
+         * (the bitmap is recorded once into a RenderNode that carries the blur RenderEffect, then
+         * the node is replayed onto [canvas]), or directly on older APIs. Any clipping the caller
+         * set on [canvas] applies AFTER the blur, matching the CPU "blur whole image, then clip"
+         * semantics — so key edges stay sharp without GPU haloing.
+         */
+        private fun drawFullScreenBlur(canvas: Canvas, bitmap: Bitmap) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && hasRenderEffect && canvas.isHardwareAccelerated) {
+                val node = obtainBlurNode()
+                if (node.setPosition(0, 0, width, height) || blurNodeDirty || !node.hasDisplayList()) {
+                    val rc = node.beginRecording(width, height)
+                    try {
+                        rc.drawBitmap(bitmap, srcRect, dstRect, paint)
+                    } finally {
+                        node.endRecording()
+                    }
+                    blurNodeDirty = false
+                }
+                canvas.drawRenderNode(node)
+            } else {
+                canvas.drawBitmap(bitmap, srcRect, dstRect, paint)
             }
         }
 
@@ -274,9 +324,7 @@ class InputView(
                 collectBlurTargets(windowManager.view, blurTargetViews)
                 keyHierarchyDirty = false
             }
-            windowManager.view.getLocationInWindow(containerLoc)
-            val offsetX = windowManager.view.left
-            val offsetY = windowManager.view.top
+            getLocationInWindow(selfLoc)
             fun buildClipRects() {
                 hasVisibleKey = false
                 keyClipRects.clear()
@@ -301,15 +349,12 @@ class InputView(
                         vMargin = 0
                         radius = (target.getTag(R.id.blur_mask_clip_radius) as? Number)?.toFloat() ?: 0f
                     }
-                    val relativeLeft = keyLoc[0] - containerLoc[0]
-                    val relativeTop = keyLoc[1] - containerLoc[1]
                     clipRect.set(
-                        relativeLeft + hMargin,
-                        relativeTop + vMargin,
-                        relativeLeft + target.width - hMargin,
-                        relativeTop + target.height - vMargin
+                        keyLoc[0] - selfLoc[0] + hMargin,
+                        keyLoc[1] - selfLoc[1] + vMargin,
+                        keyLoc[0] - selfLoc[0] + target.width - hMargin,
+                        keyLoc[1] - selfLoc[1] + target.height - vMargin
                     )
-                    clipRect.offset(offsetX, offsetY)
                     if (!clipRect.intersect(0, 0, width, height)) return@forEach
                     keyClipRects.add(Rect(clipRect))
                     keyClipRadii.add(radius.coerceIn(0f, minOf(clipRect.width(), clipRect.height()) * 0.5f))
@@ -628,7 +673,7 @@ class InputView(
             keyBlurMaskView.setBlurBitmap(null)
             return
         }
-        val useGpuBlur = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !keyBorder
+        val useGpuBlur = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
         blurUpdateJob = blurUpdateScope.launch {
             val bitmap = withContext(Dispatchers.Default) {
                 if (useGpuBlur) {
@@ -1399,7 +1444,6 @@ class InputView(
     }
 
     private val scope = DynamicScope()
-    private val themedContext = context.withTheme(R.style.Theme_InputViewTheme)
     private val broadcaster = InputBroadcaster()
     private val popup = PopupComponent()
     private val punctuation = PunctuationComponent()

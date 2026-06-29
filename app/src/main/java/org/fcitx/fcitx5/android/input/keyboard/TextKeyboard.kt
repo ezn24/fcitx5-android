@@ -1,6 +1,6 @@
 /*
  * SPDX-License-Identifier: LGPL-2.1-or-later
- * SPDX-FileCopyrightText: Copyright 2021-2023 Fcitx5 for Android Contributors
+ * SPDX-FileCopyrightText: Copyright 2021-2026 Fcitx5 for Android Contributors
  */
 package org.fcitx.fcitx5.android.input.keyboard
 
@@ -67,6 +67,7 @@ class TextKeyboard(
         private fun onTextLayoutFileChanged() {
             cachedRawLayoutJson = null
             lastRawModified = 0L
+            lastRawLayoutFile = null
             val living = attachedKeyboards.mapNotNull { it.get() }
             attachedKeyboards.removeAll { it.get() == null }
             living.forEach { keyboard ->
@@ -96,6 +97,7 @@ class TextKeyboard(
         // Cache for raw JSON layout (preserves submode structure)
         internal var cachedRawLayoutJson: JsonObject? = null
         private var lastRawModified = 0L
+        private var lastRawLayoutFile: String? = null
 
         // Compatibility alias for cachedRawLayoutJson (used by SplitKeyboardCalibrationActivity)
         @JvmStatic
@@ -103,6 +105,9 @@ class TextKeyboard(
             get() = cachedRawLayoutJson
             set(value) {
                 cachedRawLayoutJson = value
+                if (value == null) {
+                    lastRawLayoutFile = null
+                }
             }
 
         // Cache for parsed KeyDef layouts to avoid recreating them on every reloadLayout()
@@ -356,10 +361,16 @@ class TextKeyboard(
                 val snapshot = org.fcitx.fcitx5.android.input.config.ConfigProviders
                     .readTextKeyboardLayout<JsonObject>() ?: run {
                     cachedRawLayoutJson = null
+                    lastRawLayoutFile = null
                     return null
                 }
-                if (cachedRawLayoutJson == null || snapshot.lastModified != lastRawModified) {
+                val currentFile = snapshot.file?.absolutePath
+                if (cachedRawLayoutJson == null ||
+                    currentFile != lastRawLayoutFile ||
+                    snapshot.lastModified != lastRawModified
+                ) {
                     lastRawModified = snapshot.lastModified
+                    lastRawLayoutFile = currentFile
                     cachedRawLayoutJson = snapshot.value
                     // Invalidate KeyDef cache when JSON changes
                     lastLayoutCacheInvalidated = snapshot.lastModified
@@ -893,10 +904,17 @@ class TextKeyboard(
             is PopupAction.PreviewAction -> action.copy(content = transformPopupPreview(action.content))
             is PopupAction.PreviewUpdateAction -> action.copy(content = transformPopupPreview(action.content))
             is PopupAction.ShowKeyboardAction -> {
-                val label = action.keyboard.label
-                if (label.length == 1 && label[0].isLetter())
-                    action.copy(keyboard = KeyDef.Popup.Keyboard(transformAlphabet(label)))
-                else action
+                when (action.keyboard) {
+                    is KeyDef.Popup.Keyboard.Preset -> {
+                        val label = action.keyboard.label
+                        if (label.length == 1 && label[0].isLetter())
+                            action.copy(
+                                keyboard = action.keyboard.copy(label = transformAlphabet(label))
+                            )
+                        else action
+                    }
+                    is KeyDef.Popup.Keyboard.Explicit -> action
+                }
             }
             else -> action
         }

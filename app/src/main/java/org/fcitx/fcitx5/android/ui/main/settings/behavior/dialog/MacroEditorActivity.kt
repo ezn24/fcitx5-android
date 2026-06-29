@@ -27,6 +27,9 @@ import androidx.core.view.updatePadding
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import org.fcitx.fcitx5.android.R
+import org.fcitx.fcitx5.android.input.keyboard.KeyAction
+import org.fcitx.fcitx5.android.input.keyboard.KeyRef
+import org.fcitx.fcitx5.android.input.keyboard.MacroStep
 import org.fcitx.fcitx5.android.utils.serializable
 import org.fcitx.fcitx5.android.ui.main.settings.behavior.FlowLayout
 import org.fcitx.fcitx5.android.ui.main.settings.behavior.adapter.SimpleDividerItemDecoration
@@ -132,6 +135,79 @@ class MacroEditorActivity : AppCompatActivity() {
         const val EXTRA_EVENT_TYPE = "event_type"
         const val EXTRA_MACRO_RESULT = "macro_result"
         const val EXTRA_LAYOUT_TARGETS = "layout_targets"
+        const val EXTRA_MACRO_STEPS_JSON = "macro_steps_json"
+        const val EXTRA_MACRO_RESULT_JSON = "macro_result_json"
+
+        /**
+         * Convert [MacroStep] list to [ArrayList] of [Map] for use as Intent extra.
+         */
+        fun toStepsExtra(steps: List<MacroStep>): ArrayList<Map<String, Any?>> {
+            val result = ArrayList<Map<String, Any?>>()
+            for (step in steps) {
+                result.add(when (step) {
+                    is MacroStep.Tap -> mapOf("type" to "tap", "keys" to step.keys.map { it.toMap() })
+                    is MacroStep.Down -> mapOf("type" to "down", "keys" to step.keys.map { it.toMap() })
+                    is MacroStep.Up -> mapOf("type" to "up", "keys" to step.keys.map { it.toMap() })
+                    is MacroStep.Text -> mapOf("type" to "text", "text" to step.text)
+                    is MacroStep.Edit -> mapOf("type" to "edit", "action" to step.action)
+                    is MacroStep.AppAction -> mapOf("type" to "app", "id" to step.id)
+                    is MacroStep.Shortcut -> mapOf(
+                        "type" to "shortcut",
+                        "modifiers" to step.modifiers.map { it.toMap() },
+                        "key" to step.key.toMap()
+                    )
+                    is MacroStep.LayerSwitch -> mapOf("type" to "layer", "mode" to step.mode.name, "target" to step.target)
+                })
+            }
+            return result
+        }
+
+        /**
+         * Convert result from Intent extra back to [MacroStep] list.
+         */
+        @Suppress("UNCHECKED_CAST")
+        fun fromStepsExtra(data: ArrayList<Map<*, *>>?): List<MacroStep> {
+            if (data == null) return emptyList()
+            return data.mapNotNull { map ->
+                val m = map as Map<String, Any?>
+                when (val type = m["type"] as? String) {
+                    "tap" -> MacroStep.Tap((m["keys"] as? List<Map<*,*>>).toKeyRefs())
+                    "down" -> MacroStep.Down((m["keys"] as? List<Map<*,*>>).toKeyRefs())
+                    "up" -> MacroStep.Up((m["keys"] as? List<Map<*,*>>).toKeyRefs())
+                    "text" -> MacroStep.Text(m["text"] as? String ?: "")
+                    "edit" -> MacroStep.Edit(m["action"] as? String ?: "paste")
+                    "app" -> MacroStep.AppAction(m["id"] as? String ?: "theme")
+                    "shortcut" -> {
+                        val mods = (m["modifiers"] as? List<Map<*,*>>).toKeyRefs()
+                        val key = (m["key"] as? Map<*,*>)?.toKeyRef() ?: return@mapNotNull null
+                        MacroStep.Shortcut(mods, key)
+                    }
+                    "layer" -> {
+                        val mode = when (m["mode"] as? String) {
+                            "TO" -> KeyAction.LayerSwitchMode.TO
+                            "OSL" -> KeyAction.LayerSwitchMode.OSL
+                            else -> return@mapNotNull null
+                        }
+                        MacroStep.LayerSwitch(mode, m["target"] as? String ?: "")
+                    }
+                    else -> null
+                }
+            }
+        }
+
+        private fun KeyRef.toMap(): Map<String, String> = when (this) {
+            is KeyRef.Fcitx -> mapOf("fcitx" to code)
+            is KeyRef.Android -> mapOf("android" to code.toString())
+        }
+
+        private fun List<Map<*, *>>?.toKeyRefs(): List<KeyRef> =
+            this?.mapNotNull { it.toKeyRef() } ?: emptyList()
+
+        private fun Map<*, *>.toKeyRef(): KeyRef? {
+            (this["fcitx"] as? String)?.let { return KeyRef.Fcitx(it) }
+            (this["android"] as? String)?.let { return KeyRef.Android(it.toIntOrNull() ?: return null) }
+            return null
+        }
 
         val STEP_TYPES = arrayOf("tap", "shortcut", "edit", "app", "layer", "down", "up", "text")
         val KEY_TYPES = arrayOf("fcitx", "android")
@@ -574,15 +650,21 @@ class MacroEditorActivity : AppCompatActivity() {
         android.util.Log.d("MacroEditor", "Received initialSteps: $originalSteps")
         if (originalSteps != null) {
             steps.clear()
-            steps.addAll(originalSteps!!.map {
-                val parsed = parseStep(it)
-                android.util.Log.d("MacroEditor", "Parsed step: type=${parsed.type}, keys=${parsed.keys}")
-                parsed
-            })
+            steps.addAll(originalSteps!!.map { parseStep(it) })
         } else {
-            android.util.Log.d("MacroEditor", "No initialSteps, adding default tap step")
-            // Add a default tap step
-            steps.add(MacroStepData())
+            // Try JSON format if Map format is null (e.g. from new ButtonsCustomizerActivity)
+            val json = intent.getStringExtra(EXTRA_MACRO_STEPS_JSON)
+            if (json != null) {
+                try {
+                    val macroList = macroJson.decodeFromString<List<MacroStep>>(json)
+                    steps.clear()
+                    steps.addAll(macroList.map { macroStepToData(it) })
+                } catch (_: Exception) {
+                    steps.add(MacroStepData())
+                }
+            } else {
+                steps.add(MacroStepData())
+            }
         }
 
         updateSaveButtonState()
@@ -602,6 +684,58 @@ class MacroEditorActivity : AppCompatActivity() {
         }
         ViewCompat.requestApplyInsets(toolbar)
     }
+
+    /**
+     * Show a dialog containing a scrollable FlowLayout of chips.
+     * Tapping a chip calls [onSelect] with its index and dismisses the dialog.
+     */
+    private fun showScrollableChipsDialog(
+        title: String,
+        items: List<String>,
+        highlightIndex: Int = -1,
+        onSelect: (Int) -> Unit
+    ) {
+        val chipsContainer = FlowLayout(this).apply {
+            setPadding(dp(12), dp(8), dp(12), dp(8))
+        }
+        val primaryColor = styledColor(android.R.attr.colorPrimary)
+        val buttonColor = styledColor(android.R.attr.colorButtonNormal)
+        val borderColor = styledColor(android.R.attr.colorControlNormal)
+        val scrollView = android.widget.ScrollView(this).apply {
+            addView(chipsContainer)
+        }
+        val dialog = AlertDialog.Builder(this)
+            .setTitle(title)
+            .setView(scrollView)
+            .setNegativeButton(R.string.macro_editor_picker_cancel, null)
+            .create()
+        items.forEachIndexed { index, label ->
+            val isHighlighted = index == highlightIndex
+            val chip = TextView(this).apply {
+                text = label
+                textSize = 14f
+                setPadding(dp(12), dp(8), dp(12), dp(8))
+                gravity = Gravity.CENTER
+                background = android.graphics.drawable.GradientDrawable().apply {
+                    setColor(if (isHighlighted) primaryColor else buttonColor)
+                    setStroke(dp(1), borderColor)
+                    cornerRadius = dp(4).toFloat()
+                }
+                layoutParams = ViewGroup.MarginLayoutParams(wrapContent, wrapContent).apply {
+                    rightMargin = dp(6)
+                    bottomMargin = dp(6)
+                }
+                setOnClickListener {
+                    onSelect(index)
+                    dialog.dismiss()
+                }
+            }
+            chipsContainer.addView(chip)
+        }
+        dialog.show()
+    }
+
+    private val macroJson = kotlinx.serialization.json.Json { ignoreUnknownKeys = true; encodeDefaults = true }
 
     private fun parseStep(stepMap: Map<*, *>): MacroStepData {
         val type = stepMap["type"] as? String ?: "tap"
@@ -648,6 +782,27 @@ class MacroEditorActivity : AppCompatActivity() {
         }
 
         return MacroStepData(type = type, keys = keys, text = text)
+    }
+
+    private fun macroStepToData(step: MacroStep): MacroStepData = when (step) {
+        is MacroStep.Tap -> MacroStepData("tap", keys = step.keys.map { keyRefToData(it) }.toMutableList())
+        is MacroStep.Down -> MacroStepData("down", keys = step.keys.map { keyRefToData(it) }.toMutableList())
+        is MacroStep.Up -> MacroStepData("up", keys = step.keys.map { keyRefToData(it) }.toMutableList())
+        is MacroStep.Text -> MacroStepData("text", text = step.text)
+        is MacroStep.Edit -> MacroStepData("edit", keys = mutableListOf(KeyData("fcitx", step.action)))
+        is MacroStep.AppAction -> MacroStepData("app", keys = mutableListOf(KeyData("fcitx", step.id)))
+        is MacroStep.Shortcut -> {
+            val keys = mutableListOf<KeyData>()
+            keys.addAll(step.modifiers.map { keyRefToData(it) })
+            keys.add(keyRefToData(step.key))
+            MacroStepData("shortcut", keys = keys)
+        }
+        is MacroStep.LayerSwitch -> MacroStepData("layer", keys = mutableListOf(KeyData("fcitx", step.mode.name)), text = step.target)
+    }
+
+    private fun keyRefToData(ref: KeyRef): KeyData = when (ref) {
+        is KeyRef.Fcitx -> KeyData("fcitx", ref.code)
+        is KeyRef.Android -> KeyData("android", ref.code.toString())
     }
 
 
@@ -834,6 +989,9 @@ class MacroEditorActivity : AppCompatActivity() {
 
         val data = android.content.Intent()
         data.putExtra(EXTRA_MACRO_RESULT, ArrayList(result))
+        // Also provide JSON format for reliable deserialization
+        val macroSteps = fromStepsExtra(ArrayList(result))
+        data.putExtra(EXTRA_MACRO_RESULT_JSON, macroJson.encodeToString(macroSteps))
         setResult(RESULT_OK, data)
         finish()
     }
@@ -1406,7 +1564,15 @@ class MacroEditorActivity : AppCompatActivity() {
                 "settings_license",
                 "edit_text_keyboard_layout",
                 "text_keyboard_layout_file_select",
-                "edit_fontset"
+                "edit_fontset",
+                "addon_list",
+                "table_input_methods",
+                "quick_phrase_list",
+                "pinyin_custom_phrase",
+                "pinyin_dict",
+                "edit_buttons",
+                "split_keyboard_calibration",
+                "web_editor_bridge"
             )
             val actionLabels = arrayOf(
                 getString(R.string.theme),
@@ -1434,7 +1600,15 @@ class MacroEditorActivity : AppCompatActivity() {
                 getString(R.string.license),
                 getString(R.string.edit_text_keyboard_layout),
                 getString(R.string.text_keyboard_layout_file_select_title),
-                getString(R.string.edit_fontset)
+                getString(R.string.edit_fontset),
+                getString(R.string.addons),
+                getString(R.string.macro_editor_table_input_methods),
+                getString(R.string.quickphrase_editor),
+                getString(R.string.macro_editor_pinyin_custom_phrase),
+                getString(R.string.macro_editor_pinyin_dict),
+                getString(R.string.edit_buttons),
+                getString(R.string.split_keyboard_calibration_title),
+                getString(R.string.web_editor_bridge_title)
             )
             AlertDialog.Builder(this@MacroEditorActivity)
                 .setTitle(R.string.macro_editor_app_picker_title)
@@ -1473,6 +1647,14 @@ class MacroEditorActivity : AppCompatActivity() {
                 "edit_text_keyboard_layout" -> getString(R.string.edit_text_keyboard_layout)
                 "text_keyboard_layout_file_select" -> getString(R.string.text_keyboard_layout_file_select_title)
                 "edit_fontset" -> getString(R.string.edit_fontset)
+                "addon_list" -> getString(R.string.addons)
+                "table_input_methods" -> getString(R.string.macro_editor_table_input_methods)
+                "quick_phrase_list" -> getString(R.string.quickphrase_editor)
+                "pinyin_custom_phrase" -> getString(R.string.macro_editor_pinyin_custom_phrase)
+                "pinyin_dict" -> getString(R.string.macro_editor_pinyin_dict)
+                "edit_buttons" -> getString(R.string.edit_buttons)
+                "split_keyboard_calibration" -> getString(R.string.split_keyboard_calibration_title)
+                "web_editor_bridge" -> getString(R.string.web_editor_bridge_title)
                 else -> actionId
             }
         }
@@ -1511,53 +1693,64 @@ class MacroEditorActivity : AppCompatActivity() {
             // Not adding keyTypeRow to dialogView - hidden from UI
             // dialogView.addView(keyTypeRow)
 
-            // Key value selector
-            val keyValueRow = LinearLayout(this@MacroEditorActivity).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-                setPadding(0, dp(4), 0, dp(4))
+            // Key value selector - directly embedded chips list
+            var currentKeyType = key.keyType
+            val keysList = if (currentKeyType == "fcitx") FCITX_KEYS else ANDROID_KEYS
+            val displayList = if (currentKeyType == "fcitx") {
+                keysList.map { getFcitxKeyDisplayName(it) }
+            } else {
+                keysList.map { ANDROID_KEY_NAMES[it] ?: it }
             }
-            val keyValueLabel = TextView(this@MacroEditorActivity).apply {
-                text = getString(R.string.macro_editor_key_value_label)
-                textSize = 14f
-                layoutParams = LinearLayout.LayoutParams(wrapContent, wrapContent)
-            }
-            keyValueRow.addView(keyValueLabel)
+            val primaryColor = styledColor(android.R.attr.colorPrimary)
+            val buttonColor = styledColor(android.R.attr.colorButtonNormal)
+            val borderColor = styledColor(android.R.attr.colorControlNormal)
 
-            val keyValueSpinner = Spinner(this@MacroEditorActivity, Spinner.MODE_DROPDOWN).apply {
-                layoutParams = LinearLayout.LayoutParams(0, wrapContent).apply {
-                    weight = 1f
-                    marginStart = dp(8)
+            var highlightIndex = keysList.indexOfFirst { it.equals(key.code, ignoreCase = true) }
+                .takeIf { it >= 0 } ?: -1
+
+            val chipsContainer = FlowLayout(this@MacroEditorActivity).apply {
+                setPadding(dp(12), dp(8), dp(12), dp(8))
+            }
+
+            fun renderChips() {
+                chipsContainer.removeAllViews()
+                keysList.forEachIndexed { index, _ ->
+                    val isHighlighted = index == highlightIndex
+                    val chip = TextView(this@MacroEditorActivity).apply {
+                        text = displayList[index]
+                        textSize = 14f
+                        setPadding(dp(12), dp(8), dp(12), dp(8))
+                        gravity = Gravity.CENTER
+                        background = android.graphics.drawable.GradientDrawable().apply {
+                            setColor(if (isHighlighted) primaryColor else buttonColor)
+                            setStroke(dp(1), borderColor)
+                            cornerRadius = dp(4).toFloat()
+                        }
+                        layoutParams = ViewGroup.MarginLayoutParams(wrapContent, wrapContent).apply {
+                            rightMargin = dp(6)
+                            bottomMargin = dp(6)
+                        }
+                        setOnClickListener {
+                            key.code = keysList[index]
+                            highlightIndex = index
+                            renderChips()
+                        }
+                    }
+                    chipsContainer.addView(chip)
                 }
             }
-            val keysList = if (key.keyType == "fcitx") FCITX_KEYS else ANDROID_KEYS
-            // Use friendly names (Android key codes show as names, Fcitx keys show with symbol hints)
-            val displayList = if (key.keyType == "fcitx") {
-                FCITX_KEYS.map { getFcitxKeyDisplayName(it) }.toTypedArray()
-            } else {
-                ANDROID_KEYS.map { ANDROID_KEY_NAMES[it] ?: it }.toTypedArray()
+            renderChips()
+
+            val scrollView = android.widget.ScrollView(this@MacroEditorActivity).apply {
+                addView(chipsContainer)
             }
-            val keyValueAdapter = ArrayAdapter(
-                this@MacroEditorActivity,
-                android.R.layout.simple_spinner_item,
-                displayList
-            )
-            // Use a custom dropdown view to show more content in one line
-            keyValueAdapter.setDropDownViewResource(R.layout.spinner_dropdown_item)
-            keyValueSpinner.adapter = keyValueAdapter
-            // Try to match current key value (case-insensitive)
-            val keyIndex = keysList.indexOfFirst { it.equals(key.code, ignoreCase = true) }.takeIf { it >= 0 } ?: 0
-            keyValueSpinner.setSelection(keyIndex)
-            keyValueRow.addView(keyValueSpinner)
-            dialogView.addView(keyValueRow)
+            dialogView.addView(scrollView)
 
             val dialog = AlertDialog.Builder(this@MacroEditorActivity)
                 .setTitle(R.string.macro_editor_edit_key_title)
                 .setView(dialogView)
                 .setPositiveButton(R.string.macro_editor_confirm) { _, _ ->
-                    key.keyType = KEY_TYPES[keyTypeEditSpinner.selectedItemPosition]
-                    val currentKeysList = if (key.keyType == "fcitx") FCITX_KEYS else ANDROID_KEYS
-                    key.code = currentKeysList[keyValueSpinner.selectedItemPosition]
+                    key.keyType = currentKeyType
                     onSuccess()
                 }
                 .setNegativeButton(R.string.macro_editor_cancel) { _, _ ->
@@ -1573,27 +1766,16 @@ class MacroEditorActivity : AppCompatActivity() {
                 dialog.dismiss()
             }
 
-            // Key type change listener - update key value list
+            // Key type change listener - hidden spinner, no-op
+            var isInitialKeyTypeSelection = true
             keyTypeEditSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
                 override fun onItemSelected(parent: AdapterView<*>?, view: View?, pos: Int, id: Long) {
-                    val newKeyType = KEY_TYPES[pos]
-                    val newKeysList = if (newKeyType == "fcitx") FCITX_KEYS else ANDROID_KEYS
-                    // Use friendly names
-                    val newDisplayList = if (newKeyType == "fcitx") {
-                        FCITX_KEYS.map { getFcitxKeyDisplayName(it) }.toTypedArray()
-                    } else {
-                        ANDROID_KEYS.map { ANDROID_KEY_NAMES[it] ?: it }.toTypedArray()
+                    if (isInitialKeyTypeSelection) {
+                        isInitialKeyTypeSelection = false
+                        return
                     }
-                    val newAdapter = ArrayAdapter(
-                        this@MacroEditorActivity,
-                        android.R.layout.simple_spinner_item,
-                        newDisplayList
-                    )
-                    newAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
-                    keyValueSpinner.adapter = newAdapter
-                    // Try to match current value
-                    val newIndex = newKeysList.indexOfFirst { it.equals(key.code, ignoreCase = true) }.takeIf { it >= 0 } ?: 0
-                    keyValueSpinner.setSelection(newIndex)
+                    currentKeyType = KEY_TYPES[pos]
+                    // Key type spinner is hidden (GONE), chips are embedded directly in dialog
                 }
                 override fun onNothingSelected(parent: AdapterView<*>?) {}
             }
@@ -1621,13 +1803,12 @@ class MacroEditorActivity : AppCompatActivity() {
                 return
             }
 
-            AlertDialog.Builder(this@MacroEditorActivity)
-                .setTitle(R.string.macro_editor_select_modifier_title)
-                .setItems(availableModifiers.toTypedArray()) { _, which ->
-                    onSelect(availableModifiers[which])
-                }
-                .setNegativeButton(R.string.macro_editor_cancel, null)
-                .show()
+            showScrollableChipsDialog(
+                title = getString(R.string.macro_editor_select_modifier_title),
+                items = availableModifiers
+            ) { index ->
+                onSelect(availableModifiers[index])
+            }
         }
 
         private fun showLayerTargetPicker(currentTarget: String, onSelect: (String) -> Unit) {

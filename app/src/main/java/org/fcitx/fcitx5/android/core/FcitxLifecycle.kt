@@ -5,69 +5,66 @@
 package org.fcitx.fcitx5.android.core
 
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.CancellableContinuation
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancelChildren
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.updateAndGet
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.suspendCancellableCoroutine
-import java.util.concurrent.ConcurrentLinkedQueue
-import java.util.concurrent.atomic.AtomicBoolean
-import kotlin.coroutines.CoroutineContext
-import kotlin.coroutines.resume
 
 class FcitxLifecycleRegistry : FcitxLifecycle {
 
-    private val observers = ConcurrentLinkedQueue<FcitxLifecycleObserver>()
+    private val internalStateFlow = MutableStateFlow(FcitxLifecycle.State.STOPPED)
 
-    override fun addObserver(observer: FcitxLifecycleObserver) {
-        observers.add(observer)
-    }
-
-    override fun removeObserver(observer: FcitxLifecycleObserver) {
-        observers.remove(observer)
-    }
+    override val stateFlow = internalStateFlow.asStateFlow()
 
     override val currentState: FcitxLifecycle.State
-        get() = internalState
+        get() = internalStateFlow.value
 
-    private var internalState = FcitxLifecycle.State.STOPPED
+    private val job = SupervisorJob()
 
-    override val lifecycleScope: CoroutineScope =
-        FcitxLifecycleCoroutineScope(this).also { addObserver(it) }
+    override val lifecycleScope = CoroutineScope(job + Dispatchers.Default)
 
-    fun postEvent(event: FcitxLifecycle.Event) = synchronized(internalState) {
-        when (event) {
-            FcitxLifecycle.Event.ON_START -> {
-                ensureAt(FcitxLifecycle.State.STOPPED)
-                internalState = FcitxLifecycle.State.STARTING
-            }
-            FcitxLifecycle.Event.ON_READY -> {
-                ensureAt(FcitxLifecycle.State.STARTING)
-                internalState = FcitxLifecycle.State.READY
-            }
-            FcitxLifecycle.Event.ON_STOP -> {
-                ensureAt(FcitxLifecycle.State.READY)
-                internalState = FcitxLifecycle.State.STOPPING
-            }
-            FcitxLifecycle.Event.ON_STOPPED -> {
-                ensureAt(FcitxLifecycle.State.STOPPING)
-                internalState = FcitxLifecycle.State.STOPPED
+    fun postEvent(event: FcitxLifecycle.Event) {
+        val newState = internalStateFlow.updateAndGet {
+            when (event) {
+                FcitxLifecycle.Event.ON_START -> {
+                    ensureAt(it, FcitxLifecycle.State.STOPPED)
+                    FcitxLifecycle.State.STARTING
+                }
+                FcitxLifecycle.Event.ON_READY -> {
+                    ensureAt(it, FcitxLifecycle.State.STARTING)
+                    FcitxLifecycle.State.READY
+                }
+                FcitxLifecycle.Event.ON_STOP -> {
+                    ensureAt(it, FcitxLifecycle.State.READY)
+                    FcitxLifecycle.State.STOPPING
+                }
+                FcitxLifecycle.Event.ON_STOPPED -> {
+                    ensureAt(it, FcitxLifecycle.State.STOPPING)
+                    FcitxLifecycle.State.STOPPED
+                }
             }
         }
-        observers.forEach { it.onStateChanged(event) }
+        if (newState >= FcitxLifecycle.State.STOPPING) {
+            job.cancelChildren()
+        }
     }
 
-    private fun ensureAt(state: FcitxLifecycle.State) = takeIf { (currentState == state) }
-        ?: throw IllegalStateException("Currently not at $state!")
-
+    private fun ensureAt(currentState: FcitxLifecycle.State, state: FcitxLifecycle.State) {
+        if (currentState != state) {
+            throw IllegalStateException("Currently not at $state!")
+        }
+    }
 }
 
 interface FcitxLifecycle {
+    val stateFlow: StateFlow<State>
     val currentState: State
     val lifecycleScope: CoroutineScope
-
-    fun addObserver(observer: FcitxLifecycleObserver)
-    fun removeObserver(observer: FcitxLifecycleObserver)
 
     enum class State {
         STARTING,
@@ -82,7 +79,6 @@ interface FcitxLifecycle {
         ON_STOP,
         ON_STOPPED
     }
-
 }
 
 interface FcitxLifecycleOwner {
@@ -92,27 +88,13 @@ interface FcitxLifecycleOwner {
 val FcitxLifecycleOwner.lifeCycleScope
     get() = lifecycle.lifecycleScope
 
-fun interface FcitxLifecycleObserver {
-    fun onStateChanged(event: FcitxLifecycle.Event)
-}
-
-class FcitxLifecycleCoroutineScope(
-    val lifecycle: FcitxLifecycle,
-    override val coroutineContext: CoroutineContext = SupervisorJob()
-) : CoroutineScope, FcitxLifecycleObserver {
-    override fun onStateChanged(event: FcitxLifecycle.Event) {
-        if (lifecycle.currentState >= FcitxLifecycle.State.STOPPING) {
-            coroutineContext.cancelChildren()
-        }
-    }
-}
-
-suspend fun <T> FcitxLifecycle.whenAtState(
+suspend inline fun <T> FcitxLifecycle.whenAtState(
     state: FcitxLifecycle.State,
     block: suspend CoroutineScope.() -> T
-): T =
-    if (state == currentState) block(lifecycleScope)
-    else AtStateHelper(this, state).run(block)
+): T {
+    stateFlow.first { it == state }
+    return block(lifecycleScope)
+}
 
 suspend inline fun <T> FcitxLifecycle.whenReady(noinline block: suspend CoroutineScope.() -> T) =
     whenAtState(FcitxLifecycle.State.READY, block)
@@ -125,33 +107,3 @@ fun <T> FcitxLifecycle.launchWhenReady(block: suspend CoroutineScope.() -> T) =
 
 fun <T> FcitxLifecycle.launchWhenStopped(block: suspend CoroutineScope.() -> T) =
     lifecycleScope.launch { whenStopped(block) }
-
-private class AtStateHelper(val lifecycle: FcitxLifecycle, val state: FcitxLifecycle.State) {
-    private val observer = FcitxLifecycleObserver {
-        resumeIfReady()
-    }
-
-    private val resumed = AtomicBoolean(false)
-    private var continuation: CancellableContinuation<Unit>? = null
-
-    private fun resumeIfReady() {
-        if (lifecycle.currentState != state || !resumed.compareAndSet(false, true)) return
-        val cont = continuation ?: return
-        continuation = null
-        lifecycle.removeObserver(observer)
-        cont.resume(Unit)
-    }
-
-    suspend fun <T> run(block: suspend CoroutineScope.() -> T): T {
-        suspendCancellableCoroutine { cont ->
-            continuation = cont
-            lifecycle.addObserver(observer)
-            cont.invokeOnCancellation {
-                continuation = null
-                lifecycle.removeObserver(observer)
-            }
-            resumeIfReady()
-        }
-        return block(lifecycle.lifecycleScope)
-    }
-}

@@ -52,6 +52,11 @@
     <string name="clipboard">Portapapeles</string>
     <string name="keyboard_height">Altura de teclado</string>
     <string name="virtual_keyboard">Teclado</string>
+    <string name="keyboard_category_layout">Diseño y tamaño</string>
+    <string name="keyboard_category_behavior">Comportamiento de teclas</string>
+    <string name="keyboard_category_feedback">Retroalimentación</string>
+    <string name="keyboard_category_toolbar">Barra y candidatos</string>
+    <string name="keyboard_category_editors">Opciones extra</string>
     <string name="one_handed_keyboard">Teclado con una mano</string>
     <string name="version">Versión</string>
     <string name="source_code">Código fuente</string>
@@ -136,8 +141,7 @@
     <string name="button_sound">Sonido al presionar teclas</string>
     <string name="button_sound_volume">Volumen de sonido al presionar teclas</string>
     <string name="disable_it">Desactivarlo</string>
-    <string name="edit_popup_preset">Editar preajuste de popup</string>
-    <string name="edit_popup_preset_summary">Editar asignación de teclas de popup (tecla -&gt; candidatos de popup)</string>
+    <string name="edit_popup_preset">Configuración de caracteres emergentes</string>
     <string name="edit_buttons">Editar botones</string>
     <string name="edit_buttons_summary">Personalizar botones en Kawaii Bar y area de estado</string>
     <string name="buttons_customizer_hint">Arrastre los botones para reordenar o mover entre Kawaii Bar (fila superior) y area de estado (menu). Mantenga presionado para comenzar a arrastrar.</string>
@@ -151,6 +155,16 @@
     <string name="floating_keyboard">Teclado flotante</string>
     <string name="adjusting_mode_confirm">Listo</string>
     <string name="edit_button_title">Editar botón</string>
+    <string name="edit_button_label_id">id</string>
+    <string name="edit_button_label_text">texto</string>
+    <string name="edit_button_label_label">etiqueta</string>
+    <string name="edit_button_hint_id">identificador único</string>
+    <string name="edit_button_hint_text">emoji o carácter en lugar de icono</string>
+    <string name="edit_button_pick_icon">Elegir icono</string>
+    <string name="edit_button_macro">Macro</string>
+    <string name="edit_button_no_custom_icon">(sin icono personalizado)</string>
+    <string name="edit_button_macro_event_type">Acción de botón</string>
+    <string name="edit_button_new_custom">Nuevo botón personalizado…</string>
     <string name="delete_button_title">Eliminar botón</string>
     <string name="delete_button_confirm">¿Eliminar este botón?</string>
     <string name="popup_editor_hint">Toque un elemento para editar. Mantenga presionado para eliminar.</string>
@@ -166,7 +180,7 @@
     <string name="popup_editor_add_candidate">Añadir candidato</string>
     <string name="popup_editor_add_candidate_button">Añadir</string>
     <string name="popup_editor_candidate_input_hint">Ingrese valor del candidato</string>
-    <string name="edit_text_keyboard_layout">Editar distribución del teclado de texto</string>
+    <string name="edit_text_keyboard_layout">Modificar definición del teclado</string>
     <string name="text_keyboard_layout_preview">Vista previa</string>
     <string name="ok">Aceptar</string>
     <string name="cancel">Cancelar</string>
@@ -223,8 +237,15 @@
     <string name="text_keyboard_layout_display_text_mode_invalid">Complete la fila %1$d antes de agregar un nuevo modo</string>
     <string name="text_keyboard_layout_display_text_mode_duplicate">El nombre del modo "%1$s" ya está en uso</string>
     <string name="cannot_resolve_text_keyboard_layout">No se puede localizar el archivo de distribución del teclado de texto</string>
-    <string name="edit_text_keyboard_layout_summary_with_file">Editar diseño de teclado de texto (%1$s)</string>
     <string name="text_keyboard_layout_file_select_title">Archivo de diseño de teclado de texto</string>
+    <string name="web_editor_bridge_title">Editor en línea</string>
+    <string name="web_editor_bridge_summary">Iniciar servicio local para editar configuración en el navegador</string>
+    <string name="web_editor_bridge_running_message">Servidor en ejecución.\n\nEditor:\n%1$s\n\nAPI:\n%2$s</string>
+    <string name="web_editor_bridge_running_status">Ejecutándose · %1$s:%2$d</string>
+    <string name="web_editor_bridge_running_indicator">🟢 Editor en línea activo</string>
+    <string name="web_editor_bridge_start_failed">Error al iniciar el servidor: %1$s</string>
+    <string name="web_editor_bridge_open">Abrir página del editor</string>
+    <string name="web_editor_bridge_stop">Detener servidor</string>
     <string name="text_keyboard_layout_file_select_summary">Archivo actual: %1$s</string>
     <string name="text_keyboard_layout_file_switch">Cambiar archivo de diseño</string>
     <string name="text_keyboard_layout_file_create">Crear archivo de diseño</string>
@@ -475,9 +496,7 @@
     <string name="disable_addon_warn_optdep">Se desactivaran algunas funciones en %1$s</string>
     <string name="disable_addon_warn_title">Desactivar complemento</string>
     <string name="duplicate_builtin_theme">Duplicar tema integrado…</string>
-    <string name="edit_fontset">Editar conjunto de fuentes</string>
-    <string name="edit_fontset_summary">Editar fonts/fontset.json y previsualizar combinaciones de fuentes</string>
-    <string name="edit_text_keyboard_layout_summary">Editar diseno del teclado de texto (TextKeyboardLayout.json)</string>
+    <string name="edit_fontset">Configuración de fuentes</string>
     <string name="edited_x">Se edito %1$s</string>
     <string name="editor_info_inspector">Inspector de EditorInfo</string>
     <string name="emoji_and_symbols">Emoji y simbolos</string>
@@ -526,15 +545,14 @@
     <string name="follow_input_device">Depende del dispositivo de entrada</string>
     <string name="follow_system_day_night_theme">Seguir tema dia/noche del sistema</string>
     <string name="follow_system_day_night_theme_summary">Sobrescribir seleccion manual de tema</string>
-    <string name="fontset_editor_hint">Toque cada elemento para elegir una o mas fuentes del directorio fonts. Varias fuentes se usan como respaldo en orden.</string>
+    <string name="fontset_editor_hint">Seleccione varias fuentes para orden de respaldo, arrastre para ordenar</string>
     <string name="fontset_entry_candidate">Fuente de candidatos</string>
     <string name="fontset_entry_font">Fuente base</string>
     <string name="fontset_entry_key_alt">Fuente secundaria de tecla</string>
     <string name="fontset_entry_key_main">Fuente principal de tecla</string>
     <string name="fontset_entry_popup_key">Fuente de tecla emergente</string>
     <string name="fontset_entry_preedit">Fuente de preedicion</string>
-    <string name="fontset_saved">fontset.json guardado</string>
-    <string name="fontset_saved_at">fontset.json guardado en: %1$s</string>
+    <string name="fontset_saved_at">Guardado</string>
     <string name="grant_permission">Conceder permiso</string>
     <string name="hide_candidates_list">Ocultar lista de candidatos</string>
     <string name="hide_keyboard">Ocultar teclado</string>
@@ -595,12 +613,13 @@
     <string name="plugin_needs_reload">Se detectaron cambios en complementos, toque aqui para recargar</string>
     <string name="plugins_loaded">Cargado</string>
     <string name="popup_on_key_press">Mostrar popup al pulsar tecla</string>
-    <string name="popup_preset_saved_at">popuppreset.json guardado en: %1$s</string>
+    <string name="popup_preset_saved_at">Guardado</string>
     <string name="preferred_voice_input">Entrada de voz preferida</string>
     <string name="private_mode">Modo privado (toque para alternar la barra de herramientas)</string>
     <string name="punctuation_pos_bottom">Abajo</string>
     <string name="punctuation_pos_none">Ninguno</string>
     <string name="punctuation_pos_top_right">Arriba a la derecha</string>
+    <string name="punctuation_pos_top_center">Arriba centro</string>
     <string name="recrop_image">Recortar imagen de nuevo</string>
     <string name="reloading">Recargando</string>
     <string name="removed_n_items">Se eliminaron %1$d elemento(s)</string>
@@ -620,15 +639,13 @@
     <string name="space_behavior_activate">Alternar estado de activacion del metodo de entrada</string>
     <string name="space_behavior_picker">Mostrar dialogo selector de metodo de entrada</string>
     <string name="space_behavior_voice_input">Cambiar a entrada de voz</string>
+    <string name="space_behavior_voice_input_hold">Voice input (hold to talk)</string>
     <string name="space_long_press_behavior">Comportamiento de pulsacion larga de la barra espaciadora</string>
     <string name="space_swipe_move_cursor">Deslizar en la barra espaciadora para mover el cursor</string>
-    <string name="split_keyboard_calibration_summary">Visualizar y ajustar configuracion de teclado dividido con vista previa en tiempo real y recomendacion automatica</string>
     <string name="split_keyboard_calibration_title">Calibracion de teclado dividido</string>
-    <string name="split_keyboard_enabled">Habilitar teclado dividido automatico</string>
-    <string name="split_keyboard_enabled_summary">Activar automaticamente teclado dividido segun ancho del teclado. Si se desactiva, siempre se usa teclado completo.</string>
+    <string name="split_keyboard_enabled">Teclado dividido automático</string>
     <string name="split_keyboard_threshold">Umbral de teclado dividido</string>
     <string name="split_keyboard_use_landscape_layout">Usar diseno horizontal cuando el teclado dividido este activo</string>
-    <string name="split_keyboard_use_landscape_layout_summary">Si esta activado y el teclado dividido esta activo, usa parametros de diseno horizontal (alto, relleno, etc.). Esta opcion solo esta disponible cuando el teclado dividido automatico esta habilitado.</string>
     <string name="status_area">Area de estado</string>
     <string name="swipe_down">Deslizar hacia abajo</string>
     <string name="swipe_symbol_behavior">Dirección de deslizamiento para símbolos (cuando los símbolos están ocultos)</string>
@@ -709,4 +726,30 @@
     <string name="share_receive_archive_action_extract">Extraer en la carpeta seleccionada</string>
     <string name="share_receive_archive_action_import_file">Importar como archivos</string>
     <string name="share_receive_archive_extracted">Se extrajeron %1$d archivo(s) en %2$s.</string>
-    </resources>
+
+    <string name="voice_status_connecting">Conectando…</string>
+    <string name="voice_status_opening">Abriendo…</string>
+    <string name="voice_status_loading">Cargando…</string>
+    <string name="voice_status_floating_ready">Listo</string>
+    <string name="voice_status_recognizing">Reconociendo</string>
+    <string name="voice_status_listening">Escuchando</string>
+    <string name="voice_status_committed">Hecho</string>
+
+    <!-- Voice input error toasts -->
+    <string name="voice_error_no_permission">Permiso RECORD_AUDIO no concedido</string>
+    <string name="voice_error_failed">Error de entrada de voz</string>
+    <string name="voice_error_invalid_provider">Proveedor de entrada de voz no válido</string>
+    <string name="voice_error_not_available">Proveedor de entrada de voz no disponible</string>
+    <string name="voice_error_disconnected">Proveedor de entrada de voz desconectado</string>
+    <string name="voice_error_null_binding">El proveedor de entrada de voz devolvió un enlace nulo</string>
+    <string name="voice_error_cannot_bind">No se puede vincular el proveedor de entrada de voz</string>
+    <string name="voice_error_bind_timeout">Tiempo de espera de vinculación del proveedor de voz agotado</string>
+    <string name="voice_error_call_failed">Error al llamar al proveedor de entrada de voz</string>
+    <string name="voice_error_audio_minbuf">AudioRecord.getMinBufferSize=%d</string>
+    <string name="voice_error_audio_construct">AudioRecord construcción denegada: %s</string>
+    <string name="voice_error_audio_not_init">AudioRecord no inicializado</string>
+    <string name="voice_error_audio_start_failed">Error al iniciar grabación: %s</string>
+        <string name="macro_editor_table_input_methods">Método de entrada por tabla</string>
+    <string name="macro_editor_pinyin_custom_phrase">Frases personalizadas de Pinyin</string>
+    <string name="macro_editor_pinyin_dict">Diccionario Pinyin</string>
+</resources>

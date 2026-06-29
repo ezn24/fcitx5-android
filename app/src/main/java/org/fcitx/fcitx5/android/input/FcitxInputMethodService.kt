@@ -7,7 +7,10 @@ package org.fcitx.fcitx5.android.input
 
 import android.annotation.SuppressLint
 import android.content.ClipDescription
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.app.Dialog
 import android.content.pm.ActivityInfo
 import android.content.res.ColorStateList
@@ -55,6 +58,7 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.consumeEach
 import kotlinx.coroutines.launch
 import org.fcitx.fcitx5.android.R
+import org.fcitx.fcitx5.android.BuildConfig
 import org.fcitx.fcitx5.android.core.CapabilityFlags
 import org.fcitx.fcitx5.android.core.FcitxAPI
 import org.fcitx.fcitx5.android.core.FcitxEvent
@@ -66,6 +70,8 @@ import org.fcitx.fcitx5.android.core.KeyStates
 import org.fcitx.fcitx5.android.core.KeySym
 import org.fcitx.fcitx5.android.core.ScancodeMapping
 import org.fcitx.fcitx5.android.core.SubtypeManager
+import org.fcitx.fcitx5.android.core.TextFormatFlag
+import org.fcitx.fcitx5.android.common.ipc.VoiceInputIpc
 import org.fcitx.fcitx5.android.clipboardsync.MainService
 import org.fcitx.fcitx5.android.daemon.FcitxConnection
 import org.fcitx.fcitx5.android.daemon.FcitxDaemon
@@ -78,7 +84,9 @@ import org.fcitx.fcitx5.android.data.theme.Theme
 import org.fcitx.fcitx5.android.data.theme.ThemeManager
 import org.fcitx.fcitx5.android.input.cursor.CursorRange
 import org.fcitx.fcitx5.android.input.cursor.CursorTracker
+import org.fcitx.fcitx5.android.input.keyboard.SpaceLongPressBehavior
 import org.fcitx.fcitx5.android.input.keyboard.TextKeyboard
+import org.fcitx.fcitx5.android.input.voice.VoiceInputProviderManager
 import org.fcitx.fcitx5.android.utils.InputMethodUtil
 import org.fcitx.fcitx5.android.utils.ClipboardUriStore
 import org.fcitx.fcitx5.android.utils.alpha
@@ -87,6 +95,7 @@ import org.fcitx.fcitx5.android.utils.inputMethodManager
 import org.fcitx.fcitx5.android.utils.isTypeNull
 import org.fcitx.fcitx5.android.utils.monitorCursorAnchor
 import org.fcitx.fcitx5.android.utils.styledFloat
+import org.fcitx.fcitx5.android.utils.userManager
 import org.fcitx.fcitx5.android.utils.withBatchEdit
 import splitties.bitflags.hasFlag
 import splitties.dimensions.dp
@@ -181,61 +190,14 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
     }
 
     /**
-     * Update CandidatesView with keyboard bounds for floating candidates positioning
-     */
-    private fun updateCandidatesViewKeyboardBounds() {
-        val cv = candidatesView ?: return
-        val iv = inputView ?: return
-        val keyboardView = iv.keyboardView
-
-        // Ensure views have valid dimensions
-        if (contentView.width <= 0 || contentView.height <= 0 || 
-            keyboardView.width <= 0 || keyboardView.height <= 0) {
-            android.util.Log.d("CandidatesPos", "Views not ready: contentView=${contentView.width}x${contentView.height}, keyboardView=${keyboardView.width}x${keyboardView.height}")
-            return
-        }
-        
-        val keyboardLocation = IntArray(2)
-        keyboardView.getLocationInWindow(keyboardLocation)
-        val keyboardLeft = keyboardLocation[0].toFloat()
-        val keyboardTop = keyboardLocation[1].toFloat()
-        val keyboardRight = keyboardLeft + keyboardView.width
-        val keyboardBottom = keyboardTop + keyboardView.height
-        
-        val parentWidth = contentView.width.toFloat()
-        val parentHeight = contentView.height.toFloat()
-
-        // Get cursor Y position from InputView
-        // This is the Y coordinate of the text input area (where text appears)
-        val cursorY = iv.getInputFieldTopY()
-
-        // Check if virtual keyboard is visible
-        val isKeyboardVisible = inputDeviceManager.isVirtualKeyboard
-
-        android.util.Log.d("CandidatesPos", "updateKeyboardBounds: keyboard=($keyboardLeft,$keyboardTop,$keyboardRight,$keyboardBottom), cursorY=$cursorY, parent=${parentWidth}x${parentHeight}, isKeyboardVisible=$isKeyboardVisible")
-
-        cv.updateKeyboardBounds(
-            floatArrayOf(keyboardLeft, keyboardTop, keyboardRight, keyboardBottom),
-            floatArrayOf(parentWidth, parentHeight),
-            cursorY,
-            isKeyboardVisible
-        )
-    }
-    
-    /**
      * Update paging mode and cursor anchor for "Always" floating mode
      */
     internal fun updateCandidatesViewPagingAndBounds() {
         val floatingMode = AppPrefs.getInstance().candidates.mode.getValue()
-        val useFloatingAlways = floatingMode == FloatingCandidatesMode.Always
-        
-        android.util.Log.d("FloatingCandidates", "updateCandidatesViewPagingAndBounds: mode=$floatingMode")
-        
+        if (floatingMode != FloatingCandidatesMode.Always) return
+
         // Enable candidate paging mode for "Always" floating mode
-        if (useFloatingAlways) {
-            android.util.Log.d("FloatingCandidates", "setCandidatePagingMode: 1")
-            requestCandidatePagingMode(1)
-        }
+        requestCandidatePagingMode(1)
         
         // Enable cursor anchor monitoring to get actual cursor position from app
         // This will trigger onUpdateCursorAnchorInfo callback
@@ -278,8 +240,6 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
             cursorTop = keyboardTop
         }
 
-        android.util.Log.d("CandidatesPos", "updateCursorAnchorForFloatingCandidates: cursorTop=$cursorTop, cursorBottom=$cursorBottom, keyboardTop=$keyboardTop, parent=${parentWidth}x${parentHeight}, isKeyboardVisible=$isKeyboardVisible")
-
         // Pass keyboard top as additional reference for positioning
         cv.updateCursorAnchorForFloating(
             floatArrayOf(anchorPosition[0], cursorBottom, cursorTop),
@@ -288,9 +248,6 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
             isKeyboardVisible
         )
     }
-    
-    private val anchorPositionForFloating = floatArrayOf(0f, 0f, 0f, 0f)
-
     private var capabilityFlags = CapabilityFlags.DefaultFlags
 
     private val selection = CursorTracker()
@@ -334,6 +291,28 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
         prefs.advanced.disableAnimation,
         prefs.advanced.ignoreSystemWindowInsets,
     )
+
+    private val voiceInputCommitReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            when (intent?.action) {
+                BuildConfig.APPLICATION_ID + VoiceInputIpc.PARTIAL_ACTION_SUFFIX -> {
+                    val text = intent.getStringExtra(VoiceInputIpc.EXTRA_PARTIAL_TEXT).orEmpty()
+                    android.util.Log.i("FcitxVoiceInput", "floating partial received len=${text.length}: $text")
+                    if (text.isNotBlank()) {
+                        lifecycleScope.launch { setVoiceComposingText(text) }
+                    }
+                }
+                BuildConfig.APPLICATION_ID + VoiceInputIpc.COMMIT_ACTION_SUFFIX -> {
+                    val text = intent.getStringExtra(VoiceInputIpc.EXTRA_COMMIT_TEXT).orEmpty()
+                    android.util.Log.i("FcitxVoiceInput", "floating commit received len=${text.length}: $text")
+                    if (text.isNotBlank()) {
+                        lifecycleScope.launch { commitVoiceText(text) }
+                        VoiceInputProviderManager.floatingCommitListener?.invoke(text)
+                    }
+                }
+            }
+        }
+    }
 
     private fun replaceInputView(theme: Theme): InputView {
         val newInputView = InputView(this, fcitx, theme)
@@ -523,6 +502,28 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
         // Register listener for floating mode changes to reset state when switching away from "Always" mode
         prefs.candidates.mode.registerOnChangeListener(onFloatingModeChangeListener)
         ThemeManager.addOnChangedListener(onThemeChangeListener)
+        val voiceIntentFilter = IntentFilter().apply {
+            addAction(BuildConfig.APPLICATION_ID + VoiceInputIpc.COMMIT_ACTION_SUFFIX)
+            addAction(BuildConfig.APPLICATION_ID + VoiceInputIpc.PARTIAL_ACTION_SUFFIX)
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(
+                voiceInputCommitReceiver,
+                voiceIntentFilter,
+                BuildConfig.APPLICATION_ID + ".permission.PLUGIN",
+                null,
+                Context.RECEIVER_EXPORTED,
+            )
+        } else {
+            @Suppress("DEPRECATION")
+            registerReceiver(
+                voiceInputCommitReceiver,
+                voiceIntentFilter,
+                BuildConfig.APPLICATION_ID + ".permission.PLUGIN",
+                null,
+            )
+        }
+        android.util.Log.i("FcitxVoiceInput", "registered floating voice receiver actions=$voiceIntentFilter")
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             postFcitxJob {
                 SubtypeManager.syncWith(enabledIme())
@@ -785,6 +786,49 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
                 commitText(text, 1)
                 setSelection(target, target)
             }
+        }
+    }
+
+    fun setVoiceComposingText(text: String) {
+        val ic = currentInputConnection ?: return
+        if (text.isBlank()) return
+        val start = if (composing.isEmpty()) selection.latest.start else composing.start
+        val formatted = FormattedText(
+            arrayOf(text),
+            intArrayOf(TextFormatFlag.Underline.flag),
+            text.length,
+        )
+        composing.update(start, start + text.length)
+        composingText = formatted
+        selection.predict(composing.end)
+        ic.setComposingText(formatted.toSpannedString(highlightColor), 1)
+        android.util.Log.i(
+            "FcitxVoiceInput",
+            "voice composing set len=${text.length} range=$composing",
+        )
+    }
+
+    fun clearVoiceComposingText() {
+        val ic = currentInputConnection ?: return
+        if (composing.isEmpty()) return
+        resetComposingState()
+        ic.setComposingText("", 1)
+    }
+
+    fun commitVoiceText(text: String) {
+        val ic = currentInputConnection ?: return
+        if (text.isBlank()) return
+        android.util.Log.i(
+            "FcitxVoiceInput",
+            "voice commit len=${text.length} composing=${composing.isNotEmpty()} same=${composingText.toString() == text}",
+        )
+        if (composing.isNotEmpty() && composingText.toString() == text) {
+            selection.predict(composing.start + text.length)
+            resetComposingState()
+            ic.finishComposingText()
+        } else {
+            clearVoiceComposingText()
+            commitText(text)
         }
     }
 
@@ -1409,6 +1453,7 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
             val inputSessionGeneration = this.inputSessionGeneration
             Timber.d("onStartInputView: restarting=$restarting")
             MainService.startSyncService(this, "ime-start-input-view", imeSyncActive = true)
+            ensurePreferredVoiceInputProviderAvailable()
             if (org.fcitx.fcitx5.android.input.font.FontProviders.needsRefresh()) {
                 refreshViewsForFontChange()
             }
@@ -1439,6 +1484,18 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
             }
             updateStatusIcon()
         }
+    }
+
+    private fun ensurePreferredVoiceInputProviderAvailable() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && !userManager.isUserUnlocked) return
+        val keyboardPrefs = AppPrefs.getInstance().keyboard
+        val voiceInputReachable =
+            keyboardPrefs.showVoiceInputButton.getValue() ||
+                keyboardPrefs.spaceKeyLongPressBehavior.getValue() == SpaceLongPressBehavior.VoiceInput ||
+                keyboardPrefs.spaceKeyLongPressBehavior.getValue() == SpaceLongPressBehavior.VoiceInputHold
+        if (!voiceInputReachable) return
+        val preferredVoiceInput = keyboardPrefs.preferredVoiceInput.getValue()
+        VoiceInputProviderManager.ensureProviderAvailable(this, preferredVoiceInput)
     }
 
     override fun onUpdateSelection(
@@ -1517,13 +1574,13 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
         anchorPosition[2] -= xOffset
         anchorPosition[3] -= yOffset
         
-        // Update candidates view with cursor anchor
-        candidatesView?.updateCursorAnchor(anchorPosition, contentSize)
-        
-        // Also update floating candidates position in "Always" mode
+        // In "Always" floating mode, avoid doing the normal cursor-anchor
+        // positioning first and then immediately re-positioning again.
         val floatingMode = AppPrefs.getInstance().candidates.mode.getValue()
         if (floatingMode == FloatingCandidatesMode.Always) {
             updateCursorAnchorForFloatingCandidates()
+        } else {
+            candidatesView?.updateCursorAnchor(anchorPosition, contentSize)
         }
     }
 
@@ -1710,6 +1767,9 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
     override fun onFinishInputView(finishingInput: Boolean) {
         Timber.d("onFinishInputView: finishingInput=$finishingInput")
         MainService.stopSyncService(this)
+        if (VoiceInputProviderManager.isActive()) {
+            VoiceInputProviderManager.stop(this)
+        }
         decorLocationUpdated = false
         inputDeviceManager.onFinishInputView()
         currentInputConnection?.apply {
@@ -1757,6 +1817,7 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
         prefs.candidates.unregisterOnChangeListener(recreateCandidatesViewListener)
         prefs.candidates.mode.unregisterOnChangeListener(onFloatingModeChangeListener)
         ThemeManager.removeOnChangedListener(onThemeChangeListener)
+        runCatching { unregisterReceiver(voiceInputCommitReceiver) }
         super.onDestroy()
         // Fcitx might be used in super.onDestroy()
         FcitxDaemon.disconnect(javaClass.name)

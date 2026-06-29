@@ -77,6 +77,11 @@
     <string name="clipboard">Clipboard</string>
     <string name="keyboard_height">Keyboard height</string>
     <string name="virtual_keyboard">Virtual Keyboard</string>
+    <string name="keyboard_category_layout">Layout &amp; Size</string>
+    <string name="keyboard_category_behavior">Key Behavior</string>
+    <string name="keyboard_category_feedback">Key Feedback</string>
+    <string name="keyboard_category_toolbar">Toolbar &amp; Candidates</string>
+    <string name="keyboard_category_editors">Extra Options</string>
     <string name="one_handed_keyboard">One-handed Keyboard</string>
     <string name="clipboard_suggestion_timeout">Clipboard suggestion timeout</string>
     <string name="version">Version</string>
@@ -153,6 +158,7 @@
     <string name="punctuation_position">Punctuation position</string>
     <string name="punctuation_pos_bottom">Bottom</string>
     <string name="punctuation_pos_top_right">Top Right</string>
+    <string name="punctuation_pos_top_center">Top Center</string>
     <string name="punctuation_pos_none">None</string>
     <string name="expand_toolbar_by_default">Expand toolbar by default</string>
     <string name="toolbar_manually_toggled">Toolbar manually toggled</string>
@@ -203,13 +209,11 @@
     <string name="clipboard_suggestion">Show clipboard suggestions</string>
     
     <!-- Split keyboard settings (refactored) -->
-    <string name="split_keyboard_enabled">Enable auto split keyboard</string>
-    <string name="split_keyboard_enabled_summary">Automatically enable split keyboard based on keyboard width. When disabled, always use full keyboard.</string>
+    <string name="split_keyboard_enabled">Auto split keyboard</string>
     <string name="split_keyboard_threshold">Split keyboard threshold</string>
 
     <!-- Split keyboard calibration -->
     <string name="split_keyboard_calibration_title">Split Keyboard Calibration</string>
-    <string name="split_keyboard_calibration_summary">Visualize and adjust split keyboard settings with real-time preview and auto-recommendation</string>
     <string name="split_keyboard_device_info">📱 Device Info</string>
     <string name="split_keyboard_threshold_label">Split Threshold (dp)</string>
     <string name="split_keyboard_gap_label">Gap (%)</string>
@@ -243,7 +247,6 @@
     <string name="split_keyboard_auto_calibrate_toast">Applied: %1$ddp, Gap %2$d%% (%3$s)</string>
     <string name="split_keyboard_reset_toast">Reset to defaults</string>
     <string name="split_keyboard_use_landscape_layout">Use landscape layout when split keyboard active</string>
-    <string name="split_keyboard_use_landscape_layout_summary">When enabled and split keyboard is active, use landscape layout parameters (height, padding, etc.). This option is only available when auto split keyboard is enabled.</string>
     <string name="disable_addon_warn_title">Disable Addon</string>
     <string name="disable_addon_warn_name">Disabling %1$s will also:</string>
     <string name="disable_addon_warn_dep">Disable %1$s</string>
@@ -287,6 +290,7 @@
     <string name="space_behavior_activate">Toggle input method activate state</string>
     <string name="space_behavior_picker">Show input method picker dialog</string>
     <string name="space_behavior_voice_input">Switch to voice input</string>
+    <string name="space_behavior_voice_input_hold">Voice input (hold to talk)</string>
     <string name="space_key_label_mode">Space key label style</string>
     <string name="space_key_label_mode_default">Default</string>
     <string name="space_key_label_mode_compact_when_submode">Compact when submode is active</string>
@@ -314,10 +318,8 @@
     <string name="main_program">main program</string>
     <string name="edit_theme">Edit Theme</string>
     <string name="show_voice_input_button">Show voice input button</string>
-    <string name="edit_fontset">Edit fontset</string>
-    <string name="edit_fontset_summary">Edit fonts/fontset.json and preview font combinations</string>
-    <string name="edit_popup_preset">Edit popup preset</string>
-    <string name="edit_popup_preset_summary">Edit popup key mapping (key -&gt; popup candidates)</string>
+    <string name="edit_fontset">Font Settings</string>
+    <string name="edit_popup_preset">Popup Character Settings</string>
     <string name="edit_buttons">Edit Buttons</string>
     <string name="edit_buttons_summary">Customize buttons on Kawaii Bar and Status Area</string>
     <string name="buttons_customizer_hint">Drag buttons to reorder or move between Kawaii Bar (top row) and Status Area (menu). Long press to start dragging.</string>
@@ -326,11 +328,28 @@
     <string name="language_switch">Language Switch</string>
     <string name="all_buttons_added">All available buttons have been added</string>
     <string name="add_button_to_section_title">Add to Section</string>
-    <string name="custom_label_hint">Custom label (optional)</string>
+    <string name="custom_label_hint">display name shown below icon</string>
     <string name="enable_long_press_menu">Enable long press to show floating menu</string>
     <string name="floating_keyboard">Floating Keyboard</string>
     <string name="adjusting_mode_confirm">Done</string>
-    <string name="edit_button_title">Edit Button</string>
+        <string name="macro_editor_table_input_methods">Table Input Methods</string>
+    <string name="macro_editor_pinyin_custom_phrase">Pinyin Custom Phrase</string>
+    <string name="macro_editor_pinyin_dict">Pinyin Dictionary</string>
+<string name="edit_button_title">Edit Button</string>
+    <string name="edit_button_label_id">id</string>
+    <string name="edit_button_label_text">text</string>
+    <string name="edit_button_label_label">label</string>
+    <string name="edit_button_hint_id">unique identifier</string>
+    <string name="edit_button_hint_text">emoticon or character shown instead of icon</string>
+    <string name="edit_button_pick_icon">Pick Icon</string>
+    <string name="edit_button_macro">Macro</string>
+    <string name="edit_button_no_custom_icon">(no custom icon)</string>
+    <string name="edit_button_macro_event_type">Button Action</string>
+    <string name="edit_button_new_custom">New Custom Button…</string>
+    <string name="edit_button_id_empty">ID cannot be empty</string>
+    <string name="edit_button_id_reserved">ID is reserved</string>
+    <string name="edit_button_id_duplicate">ID already exists</string>
+    <string name="edit_button_unknown_action">Unknown action: %s</string>
     <string name="delete_button_title">Delete Button</string>
     <string name="delete_button_confirm">Remove this button?</string>
     <string name="popup_editor_hint">Tap an item to edit. Long press to delete.</string>
@@ -347,11 +366,10 @@
     <string name="popup_editor_add_candidate_button">Add</string>
     <string name="popup_editor_candidate_input_hint">Enter candidate value</string>
     <string name="cannot_resolve_popup_preset">Unable to resolve popup preset file</string>
-    <string name="popup_preset_saved_at">popuppreset.json saved at: %1$s</string>
-    <string name="fontset_editor_hint">Tap each item to choose one or more fonts from the fonts directory. Multiple fonts are used as fallback in order.</string>
+    <string name="popup_preset_saved_at">Saved</string>
+    <string name="fontset_editor_hint">Select multiple fonts for fallback order, drag to reorder</string>
     <string name="no_fonts_found">No font files found in fonts/</string>
-    <string name="fontset_saved">fontset.json saved</string>
-    <string name="fontset_saved_at">fontset.json saved at: %1$s</string>
+    <string name="fontset_saved_at">Saved</string>
     <string name="fontset_entry_font">Base Font</string>
     <string name="fontset_entry_key_main">Key Main Font</string>
     <string name="fontset_entry_key_alt">Key Alt Font</string>
@@ -518,10 +536,16 @@
     <string name="key_border_stroke">Enable stroke for key border</string>
     <string name="special_key_oval_shape">Use Gboard-style action keys</string>
     <!-- Text Keyboard Layout Editor -->
-    <string name="edit_text_keyboard_layout">Edit Text Keyboard Layout</string>
-    <string name="edit_text_keyboard_layout_summary">Edit text keyboard layout (TextKeyboardLayout.json)</string>
-    <string name="edit_text_keyboard_layout_summary_with_file">Edit text keyboard layout (%1$s)</string>
-    <string name="text_keyboard_layout_file_select_title">Text keyboard layout file</string>
+    <string name="edit_text_keyboard_layout">Modify Keyboard Definition</string>
+    <string name="text_keyboard_layout_file_select_title">Switch Keyboard Definition Profile</string>
+    <string name="web_editor_bridge_title">Online Editor</string>
+    <string name="web_editor_bridge_summary">Start a local service to edit configs in browser</string>
+    <string name="web_editor_bridge_running_status">Running · %1$s:%2$d</string>
+    <string name="web_editor_bridge_running_indicator">🟢 Online Editor running</string>
+    <string name="web_editor_bridge_running_message">Server is running.\n\nEditor entry:\n%1$s\n\nAPI base:\n%2$s</string>
+    <string name="web_editor_bridge_start_failed">Failed to start server: %1$s</string>
+    <string name="web_editor_bridge_open">Open editor page</string>
+    <string name="web_editor_bridge_stop">Stop server</string>
     <string name="text_keyboard_layout_file_select_summary">Current profile: %1$s</string>
     <string name="text_keyboard_layout_file_switch">Switch layout file</string>
     <string name="text_keyboard_layout_file_create">Create layout file</string>
@@ -773,4 +797,28 @@
     <string name="no_blur">No Blur</string>
     <string name="edit_text_playground">EditText Playground</string>
     <string name="update_storage_permission_denied">Storage permission denied</string>
+
+    <!-- Voice input status bar messages (keep short — limited space) -->
+    <string name="voice_status_connecting">Connecting…</string>
+    <string name="voice_status_opening">Opening…</string>
+    <string name="voice_status_loading">Loading…</string>
+    <string name="voice_status_floating_ready">Ready</string>
+    <string name="voice_status_recognizing">Recognizing</string>
+    <string name="voice_status_listening">Listening</string>
+    <string name="voice_status_committed">Done</string>
+
+    <!-- Voice input error toasts -->
+    <string name="voice_error_no_permission">RECORD_AUDIO permission not granted</string>
+    <string name="voice_error_failed">Voice input failed</string>
+    <string name="voice_error_invalid_provider">Invalid voice input provider</string>
+    <string name="voice_error_not_available">Voice input provider is not available</string>
+    <string name="voice_error_disconnected">Voice input provider disconnected</string>
+    <string name="voice_error_null_binding">Voice input provider returned no binding</string>
+    <string name="voice_error_cannot_bind">Cannot bind voice input provider</string>
+    <string name="voice_error_bind_timeout">Voice input provider bind timed out</string>
+    <string name="voice_error_call_failed">Voice input provider call failed</string>
+    <string name="voice_error_audio_minbuf">AudioRecord.getMinBufferSize=%d</string>
+    <string name="voice_error_audio_construct">AudioRecord construct denied: %s</string>
+    <string name="voice_error_audio_not_init">AudioRecord not initialized</string>
+    <string name="voice_error_audio_start_failed">startRecording failed: %s</string>
 </resources>

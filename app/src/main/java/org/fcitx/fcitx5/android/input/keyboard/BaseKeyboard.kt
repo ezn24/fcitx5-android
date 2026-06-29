@@ -763,6 +763,7 @@ abstract class BaseKeyboard(
                         GestureType.Up -> {
                             // Reset direction lock on finger up
                             swipeDirectionLocked = null
+                            onAction(KeyAction.VoiceInputHoldEnd)
                             false
                         }
                         else -> false
