@@ -28,7 +28,9 @@ import kotlin.math.max
 class ButtonsBarUi(
     override val ctx: Context,
     private val theme: Theme,
-    private var buttons: List<ConfigurableButton> = ButtonsLayoutConfig.default().kawaiiBarButtons
+    private var buttons: List<ConfigurableButton> = ButtonsLayoutConfig.default().kawaiiBarButtons,
+    private val iconResolver: ((ConfigurableButton) -> Int)? = null,
+    private val textResolver: ((ConfigurableButton) -> String?)? = null
 ) : Ui {
 
     @DrawableRes
@@ -88,8 +90,11 @@ class ButtonsBarUi(
     }
 
     @DrawableRes
-    private fun getIconResForButton(buttonId: String, customIcon: String?): Int {
+    private fun getIconResForButton(config: ConfigurableButton): Int {
+        iconResolver?.invoke(config)?.let { return it }
+
         // If custom icon is specified, try to find it
+        val customIcon = config.icon
         if (customIcon != null && !customIcon.startsWith("file:")) {
             // Try to get resource ID from name
             val resId = ctx.resources.getIdentifier(customIcon, "drawable", ctx.packageName)
@@ -97,7 +102,7 @@ class ButtonsBarUi(
         }
 
         // Return default icon from ButtonAction
-        return ButtonAction.fromId(buttonId)?.defaultIcon ?: R.drawable.ic_baseline_more_horiz_24
+        return ButtonAction.fromId(config.id)?.defaultIcon ?: R.drawable.ic_baseline_more_horiz_24
     }
 
     private fun loadFileIcon(path: String): Drawable? {
@@ -109,7 +114,10 @@ class ButtonsBarUi(
     }
 
     private fun applyIconAndText(button: ToolButton, config: ConfigurableButton) {
-        if (!config.text.isNullOrEmpty()) {
+        val resolvedText = textResolver?.invoke(config)
+        if (!resolvedText.isNullOrEmpty()) {
+            button.setText(resolvedText)
+        } else if (!config.text.isNullOrEmpty()) {
             button.setText(config.text)
         } else if (config.icon != null && config.icon.startsWith("file:")) {
             val path = config.icon.removePrefix("file:")
@@ -149,6 +157,10 @@ class ButtonsBarUi(
         recyclerView.requestLayout()
     }
 
+    fun refreshIcons() {
+        root.adapter?.notifyDataSetChanged()
+    }
+
     /**
      * Update all buttons' active state based on their ButtonAction.isActive() method.
      */
@@ -168,7 +180,7 @@ class ButtonsBarUi(
 
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ButtonViewHolder {
             val config = buttons[viewType]
-            val iconRes = getIconResForButton(config.id, config.icon)
+            val iconRes = getIconResForButton(config)
             val button = ToolButton(ctx, iconRes, theme).apply {
                 contentDescription = config.label ?: getDefaultLabel(config.id)
                 tag = config.id
@@ -200,9 +212,19 @@ class ButtonsBarUi(
             val button = holder.button
             val config = buttons[position]
             buttonMap[config.id] = button
-            applyIconAndText(button, config)
+            val resolvedText = textResolver?.invoke(config)
+            if (!resolvedText.isNullOrEmpty()) {
+                button.setText(resolvedText)
+            } else {
+                applyIconAndText(button, config)
+            }
 
             val params = holder.button.layoutParams as FlexboxLayoutManager.LayoutParams
+            if (resolvedText.isNullOrEmpty() &&
+                config.text.isNullOrEmpty() &&
+                (config.icon == null || !config.icon.startsWith("file:"))) {
+                button.setIcon(getIconResForButton(config))
+            }
 
             // Calculate ideal width for even distribution
             if (parentWidth > 0 && childCount > 0) {

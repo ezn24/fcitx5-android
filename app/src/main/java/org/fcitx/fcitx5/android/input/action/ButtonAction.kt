@@ -114,6 +114,7 @@ sealed class ButtonAction {
             CursorMoveAction,
             FloatingToggleAction,
             ClipboardAction,
+            ChttransToggleAction,
             LanguageSwitchAction,
             ThemeAction,
             InputMethodOptionsAction,
@@ -146,6 +147,7 @@ sealed class ButtonAction {
             CursorMoveAction,
             FloatingToggleAction,
             ClipboardAction,
+            ChttransToggleAction,
             MoreAction
         )
 
@@ -272,6 +274,37 @@ data object ClipboardAction : ButtonAction() {
         onActionComplete: (() -> Unit)?
     ) {
         windowManager.attachWindow(ClipboardWindow())
+    }
+}
+
+data object ChttransToggleAction : ButtonAction() {
+    override val id = "chttrans_toggle"
+    override val defaultIcon = R.drawable.ic_fcitx_status_chttrans_simp
+    override val defaultLabelRes = R.string.chttrans_toggle
+
+    override fun execute(
+        context: Context,
+        service: FcitxInputMethodService,
+        fcitx: FcitxConnection,
+        windowManager: InputWindowManager,
+        view: View?,
+        onActionComplete: (() -> Unit)?
+    ) {
+        fcitx.launchOnReady { f ->
+            val action = f.statusArea().firstOrNull {
+                it.name == "chttrans" || it.icon.startsWith("fcitx-chttrans-")
+            }
+            if (action == null) {
+                service.lifecycleScope.launch {
+                    context.toast(R.string._not_available_)
+                }
+            } else {
+                f.activateAction(action.id)
+            }
+            service.lifecycleScope.launch {
+                onActionComplete?.invoke()
+            }
+        }
     }
 }
 

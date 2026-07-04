@@ -56,7 +56,9 @@ class IdleUi(
     private val theme: Theme,
     private val popup: PopupComponent,
     private val commonKeyActionListener: CommonKeyActionListener,
-    private val buttonsConfig: List<ConfigurableButton> = ButtonsLayoutConfig.default().kawaiiBarButtons
+    private val buttonsConfig: List<ConfigurableButton> = ButtonsLayoutConfig.default().kawaiiBarButtons,
+    private val buttonIconResolver: ((ConfigurableButton) -> Int)? = null,
+    private val buttonTextResolver: ((ConfigurableButton) -> String?)? = null
 ) : Ui {
 
     enum class State {
@@ -89,7 +91,7 @@ class IdleUi(
 
     val emptyBar = Space(ctx)
 
-    val buttonsUi = ButtonsBarUi(ctx, theme, buttonsConfig)
+    val buttonsUi = ButtonsBarUi(ctx, theme, buttonsConfig, buttonIconResolver, buttonTextResolver)
 
     val clipboardUi = ClipboardSuggestionUi(ctx, theme)
 

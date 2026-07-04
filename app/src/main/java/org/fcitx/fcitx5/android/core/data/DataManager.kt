@@ -304,7 +304,13 @@ object DataManager {
 
         // Compute the difference of the created one and the old one
         // Run actions to migrate to the new hierarchy
-        DataHierarchy.diff(oldDescriptor, newHierarchy).sortedByDescending { it.ordinal }.forEach {
+        val actions = DataHierarchy.diff(oldDescriptor, newHierarchy).toMutableList()
+        val actionPaths = actions.mapTo(mutableSetOf()) { it.path }
+        newHierarchy.missingFileActions(dataDir)
+            .filter { it.path !in actionPaths }
+            .forEach(actions::add)
+
+        actions.sortedByDescending { it.ordinal }.forEach {
             Timber.d("Action: $it")
             when (it) {
                 is FileAction.CreateFile -> {

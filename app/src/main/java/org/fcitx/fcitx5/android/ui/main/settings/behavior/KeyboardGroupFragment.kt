@@ -253,7 +253,7 @@ class KeyboardGroupFragment : ManagedPreferenceFragment(AppPrefs.getInstance().k
             GROUP_FEEDBACK to setOf(
                 "haptic_on_keypress", "haptic_on_keyup", "haptic_on_repeat",
                 "button_vibration_press_milliseconds", "button_vibration_press_amplitude",
-                "sound_on_keypress", "button_sound_volume"
+                "sound_on_keypress", "button_sound_volume", "system_sound_file_mode"
             ),
             GROUP_TOOLBAR to setOf(
                 "expand_toolbar_by_default", "toolbar_manually_toggled",

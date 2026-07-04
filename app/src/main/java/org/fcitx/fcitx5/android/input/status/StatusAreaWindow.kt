@@ -75,10 +75,27 @@ class StatusAreaWindow : InputWindow.ExtendedInputWindow<StatusAreaWindow>(),
 
     private var currentButtonsConfig: List<ConfigurableButton> = emptyList()
 
-    private fun staticEntries(): Array<StatusAreaEntry> {
+    private fun isPinyinInputMethod(): Boolean {
+        return fcitx.runImmediately { inputMethodEntryCached.uniqueName == "pinyin" }
+    }
+
+    private fun chttransAction(actions: Array<Action>): Action? {
+        return actions.firstOrNull {
+            it.name == "chttrans" || it.icon.startsWith("fcitx-chttrans-")
+        }
+    }
+
+    private fun chttransText(actions: Array<Action>): String {
+        return if (chttransAction(actions)?.icon == "fcitx-chttrans-active") "繁" else "简"
+    }
+
+    private fun staticEntries(actions: Array<Action>): Array<StatusAreaEntry> {
         val config = currentButtonsConfig.ifEmpty { loadButtonsConfig() }
         // Filter out input_method_options as it's always added automatically at the end
-        val configurableEntries = config.filter { it.id != "input_method_options" }.mapNotNull { button ->
+        val configurableEntries = config.filter {
+            it.id != "input_method_options" &&
+                (it.id != "chttrans_toggle" || isPinyinInputMethod())
+        }.mapNotNull { button ->
             // Handle custom action buttons
             if (button.macroSteps != null) {
                 val label = button.label ?: button.id
@@ -93,10 +110,19 @@ class StatusAreaWindow : InputWindow.ExtendedInputWindow<StatusAreaWindow>(),
             val label = button.label ?: context.getString(action.defaultLabelRes)
 
             // Use text icon if custom text is set, otherwise use action default icon
-            val iconRes = if (!button.text.isNullOrEmpty()) 0 else action.defaultIcon
+            val displayText = if (button.id == "chttrans_toggle") {
+                chttransText(actions)
+            } else {
+                button.text
+            }
+            val iconRes = if (!displayText.isNullOrEmpty()) 0 else action.defaultIcon
 
             // Check if button should be active
-            val active = action.isActive(service)
+            val active = if (button.id == "chttrans_toggle") {
+                chttransAction(actions)?.icon == "fcitx-chttrans-active"
+            } else {
+                action.isActive(service)
+            }
 
             // Check if button has long press action
             val longPressAction = if (action.id == "floating_toggle") {
@@ -105,7 +131,7 @@ class StatusAreaWindow : InputWindow.ExtendedInputWindow<StatusAreaWindow>(),
                 null
             }
 
-            StatusAreaEntry.ActionEntry(action, label, iconRes, active, longPressAction, displayText = button.text)
+            StatusAreaEntry.ActionEntry(action, label, iconRes, active, longPressAction, displayText = displayText)
         }
 
         // Always add input_method_options at the end (fixed, not configurable)
@@ -123,7 +149,7 @@ class StatusAreaWindow : InputWindow.ExtendedInputWindow<StatusAreaWindow>(),
 
     private fun renderEntries(actions: Array<Action>) {
         adapter.entries = arrayOf(
-            *staticEntries(),
+            *staticEntries(actions),
             *Array(actions.size) { StatusAreaEntry.fromAction(actions[it]) }
         )
     }

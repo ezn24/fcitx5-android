@@ -5,6 +5,7 @@
 package org.fcitx.fcitx5.android.core.data
 
 import android.util.Base64
+import java.io.File
 import java.security.MessageDigest
 
 /**
@@ -63,6 +64,20 @@ class DataHierarchy {
             sha256(this),
             files.mapValues { it.value.first },
             symlinks.mapValues { it.value.first })
+
+    fun missingFileActions(baseDir: File): List<FileAction.UpdateFile> =
+        files.mapNotNull { (path, v) ->
+            val (sha256, src) = v
+            if (sha256.isBlank()) {
+                return@mapNotNull null
+            }
+            val file = baseDir.resolve(path)
+            if (!file.exists() || file.length() == 0L) {
+                FileAction.UpdateFile(path, src)
+            } else {
+                null
+            }
+        }
 
     companion object {
         private val digest by lazy { MessageDigest.getInstance("SHA-256") }

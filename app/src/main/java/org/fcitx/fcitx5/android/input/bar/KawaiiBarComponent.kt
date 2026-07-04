@@ -29,9 +29,11 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import org.fcitx.fcitx5.android.R
+import org.fcitx.fcitx5.android.core.Action
 import org.fcitx.fcitx5.android.core.CapabilityFlag
 import org.fcitx.fcitx5.android.core.CapabilityFlags
 import org.fcitx.fcitx5.android.core.FcitxEvent.CandidateListEvent
+import org.fcitx.fcitx5.android.core.InputMethodEntry
 import org.fcitx.fcitx5.android.data.clipboard.ClipboardManager
 import org.fcitx.fcitx5.android.data.clipboard.ClipboardCategory
 import org.fcitx.fcitx5.android.data.clipboard.db.ClipboardEntry
@@ -359,10 +361,40 @@ class KawaiiBarComponent : UniqueViewComponent<KawaiiBarComponent, FrameLayout>(
         val config = snapshot?.value ?: ButtonsLayoutConfig.default()
 
         // Filter out 'more' button from config (it's always added automatically)
-        val filteredButtons = config.kawaiiBarButtons.filter { it.id != "more" }
+        val filteredButtons = config.kawaiiBarButtons.filter {
+            it.id != "more" && shouldShowConfigurableButton(it)
+        }
 
         // Always add 'more' button at the end
         return filteredButtons + ConfigurableButton("more")
+    }
+
+    private fun isPinyinInputMethod(entry: InputMethodEntry = fcitx.runImmediately { inputMethodEntryCached }): Boolean {
+        return entry.uniqueName == "pinyin"
+    }
+
+    private fun shouldShowConfigurableButton(button: ConfigurableButton): Boolean {
+        return button.id != "chttrans_toggle" || isPinyinInputMethod()
+    }
+
+    private fun chttransAction(actions: Array<Action> = fcitx.runImmediately { statusAreaActionsCached }): Action? {
+        return actions.firstOrNull {
+            it.name == "chttrans" || it.icon.startsWith("fcitx-chttrans-")
+        }
+    }
+
+    private fun chttransText(actions: Array<Action> = fcitx.runImmediately { statusAreaActionsCached }): String {
+        return if (chttransAction(actions)?.icon == "fcitx-chttrans-active") "繁" else "简"
+    }
+
+    private var lastChttransText: String? = null
+
+    private fun resolveButtonText(button: ConfigurableButton): String? {
+        return if (button.id == "chttrans_toggle") chttransText() else null
+    }
+
+    private fun hasChttransToggleButton(): Boolean {
+        return currentButtonsConfig.any { it.id == "chttrans_toggle" }
     }
 
     private var _idleUi: IdleUi? = null
@@ -372,7 +404,14 @@ class KawaiiBarComponent : UniqueViewComponent<KawaiiBarComponent, FrameLayout>(
         get() {
             if (_idleUi == null) {
                 currentButtonsConfig = loadButtonsConfig()
-                _idleUi = IdleUi(context, theme, popup, commonKeyActionListener, currentButtonsConfig)
+                _idleUi = IdleUi(
+                    context,
+                    theme,
+                    popup,
+                    commonKeyActionListener,
+                    currentButtonsConfig,
+                    buttonTextResolver = ::resolveButtonText
+                )
                 setupIdleUiCallbacks(_idleUi!!)
             }
             return _idleUi!!
@@ -536,6 +575,7 @@ class KawaiiBarComponent : UniqueViewComponent<KawaiiBarComponent, FrameLayout>(
         val newConfig = loadButtonsConfig()
         if (newConfig != currentButtonsConfig) {
             currentButtonsConfig = newConfig
+            lastChttransText = null
             _idleUi?.buttonsUi?.updateConfig(newConfig)
             _idleUi?.let { setupCustomActionListeners(it) }
             updateButtonsState()
@@ -723,6 +763,20 @@ class KawaiiBarComponent : UniqueViewComponent<KawaiiBarComponent, FrameLayout>(
             barStateMachine.push(CandidatesUpdated, CandidateEmpty to true)
         } else {
             barStateMachine.push(CandidatesUpdated, CandidateEmpty to data.candidates.isEmpty())
+        }
+    }
+
+    override fun onImeUpdate(ime: InputMethodEntry) {
+        reloadButtonsConfig()
+    }
+
+    override fun onStatusAreaUpdate(actions: Array<Action>) {
+        if (hasChttransToggleButton()) {
+            val newText = chttransText(actions)
+            if (newText != lastChttransText) {
+                lastChttransText = newText
+                _idleUi?.buttonsUi?.refreshIcons()
+            }
         }
     }
 
