@@ -45,12 +45,23 @@ object VoiceInputProviderManager {
 
     // 3-second post-speech silence ⇒ provider emits a final segment.
     private const val DEFAULT_SILENCE_MS = 3000L
-    private const val KEEPALIVE_MIN_INTERVAL_MS = 30_000L
+    private const val KEEPALIVE_MIN_INTERVAL_MS = 10_000L
     private const val KEEPALIVE_BIND_TIMEOUT_MS = 2_000L
     /** Hard deadline for `onServiceConnected` to fire after `bindService` returns
      *  true for an active voice session. If the plugin process hangs during startup
      *  (e.g. model init deadlocks), the IME must not stay stuck in "connecting". */
     private const val ACTIVE_BIND_TIMEOUT_MS = 8_000L
+    /** Hard deadline for `onReady` to fire after the provider connected. Providers
+     *  load their model asynchronously (the binder `startSession` returns before the
+     *  model is ready), so `onServiceConnected` firing does not mean the session is
+     *  usable. Without this guard the IME stays stuck in "connecting"/"loading" forever
+     *  when a cold-start model load hangs or never emits onReady. On-device model loads
+     *  are normally well under this; the retry below covers a one-off stall. */
+    private const val ACTIVE_READY_TIMEOUT_MS = 12_000L
+    /** Total bind attempts for one voice session (initial + auto-retries). On a ready
+     *  timeout the IME rebinds once, which makes the provider bump its session
+     *  generation and reload — often recovering a one-off stuck cold start. */
+    private const val MAX_BIND_ATTEMPTS = 2
     private const val WARM_CONNECTION_HOLD_MS = 5 * 60 * 1000L
 
     // Upper bound for draining the in-flight PCM queue before sending endStream.
@@ -84,6 +95,7 @@ object VoiceInputProviderManager {
     private var activeProviderId: String? = null
     private var finishing = false
     private var sessionActive = false
+    @Volatile private var sessionReady = false
     private var floatingFallbackActive = false
     private var floatingFallbackComponent: ComponentName? = null
     private var warmConnectionReleaseGeneration = 0
@@ -284,7 +296,13 @@ object VoiceInputProviderManager {
         logI("keepalive binding provider component=$providerComponent action=$action")
         val bound = try {
             service.bindService(
-                Intent(action).apply { component = providerComponent },
+                Intent(action).apply {
+                    component = providerComponent
+                    // Allow waking the provider even if the user swiped it away or
+                    // force-stopped it (package in stopped state). Without this flag
+                    // Android rejects the bind and the provider can't be prewarmed.
+                    addFlags(Intent.FLAG_INCLUDE_STOPPED_PACKAGES)
+                },
                 connection,
                 Context.BIND_AUTO_CREATE,
             )
@@ -295,6 +313,12 @@ object VoiceInputProviderManager {
         }
         if (!bound) {
             logW("keepalive bindService returned false")
+            // Even when bindService returns false the ServiceConnection is
+            // registered; it must be unbound or it leaks (ServiceConnectionLeaked).
+            // This is the common case on OEMs that force-stopped the plugin
+            // process: the bind is rejected but the connection still lingers.
+            runCatching { service.unbindService(connection) }
+                .onFailure { Timber.w(it, "keepalive unbind after failed bind") }
             keepAliveConnection = null
             return
         }
@@ -341,6 +365,7 @@ object VoiceInputProviderManager {
         val callback = object : IVoiceInputCallback.Stub() {
             override fun onReady() {
                 logI("provider ready")
+                sessionReady = true
                 service.lifecycleScope.launch {
                     onProviderReady(service, onLevel, onError)
                     onReady()
@@ -402,6 +427,7 @@ object VoiceInputProviderManager {
         activeCallback = callback
         finishing = false
         voiceSessionTerminalized = false
+        sessionReady = false
         sessionActive = true
 
         startPreRollCapture(service, onLevel, onError)
@@ -429,6 +455,21 @@ object VoiceInputProviderManager {
                     provider.startSession(callback)
                 }) {
                 stopSession(service, keepConnectionWarm = false)
+                return
+            }
+            // A warm connection can still stall on onReady if the provider had
+            // idle-released its model and the reload hangs. Fall back to a clean fresh
+            // bind (which starts a new provider session generation) instead of leaving
+            // the IME stuck in "connecting".
+            service.lifecycleScope.launch {
+                delay(ACTIVE_READY_TIMEOUT_MS)
+                if (!voiceSessionTerminalized && activeProvider === provider && !sessionReady) {
+                    logW("warm provider ready timed out; falling back to fresh bind")
+                    releaseProviderConnection(service, callStopSession = true)
+                    // activeProvider is now null, so this re-entry takes the cold-bind
+                    // path (with its own bounded retry), not the warm-reuse path.
+                    start(service, id, onReady, onPartialResult, onError, onLevel, onFinished, onStatus)
+                }
             }
             return
         }
@@ -449,6 +490,7 @@ object VoiceInputProviderManager {
         }
 
         lateinit var connectionRef: ServiceConnection
+        var bindAttempt = 0
 
         fun abortActiveVoiceSession(message: String) {
             if (voiceSessionTerminalized || activeConnection !== connectionRef) return
@@ -462,106 +504,164 @@ object VoiceInputProviderManager {
             stopSession(service, keepConnectionWarm = false)
         }
 
-        val connection = object : ServiceConnection {
-            override fun onServiceConnected(name: ComponentName, binder: IBinder) {
-                logI("provider connected: $name")
-                tlogI("Voice input provider connected: $name")
-                activeProviderBinder = binder
-                val deathRecipient = IBinder.DeathRecipient {
-                    logW("provider binder died: $name")
-                    service.lifecycleScope.launch { abortActiveVoiceSession(appContext.getString(org.fcitx.fcitx5.android.R.string.voice_error_disconnected)) }
-                }
-                activeProviderDeathRecipient = deathRecipient
-                try {
-                    binder.linkToDeath(deathRecipient, 0)
-                } catch (e: RemoteException) {
-                    Timber.w(e, "provider binder already dead")
-                    abortActiveVoiceSession(appContext.getString(org.fcitx.fcitx5.android.R.string.voice_error_disconnected))
-                    return
-                }
-                val provider = IVoiceInputProvider.Stub.asInterface(binder)
-                activeProvider = provider
-                activeProviderId = id
-                activeSessionConfig = getPreferredSessionConfig(provider)
-                if (!callProviderSafely(onError) {
-                        configureProvider(provider, activeSessionConfig)
-                        provider.startSession(callback)
-                    }) {
-                    stopSession(service, keepConnectionWarm = false)
-                }
-            }
-
-            override fun onServiceDisconnected(name: ComponentName) {
-                logI("provider disconnected: $name")
-                abortActiveVoiceSession(appContext.getString(org.fcitx.fcitx5.android.R.string.voice_error_disconnected))
-            }
-
-            override fun onBindingDied(name: ComponentName) {
-                logW("provider binding died: $name")
-                abortActiveVoiceSession(appContext.getString(org.fcitx.fcitx5.android.R.string.voice_error_disconnected))
-            }
-
-            override fun onNullBinding(name: ComponentName) {
-                logW("provider null binding: $name")
-                abortActiveVoiceSession(appContext.getString(org.fcitx.fcitx5.android.R.string.voice_error_null_binding))
-            }
-        }
-        connectionRef = connection
-
-        activeConnection = connection
-        logI("binding provider component=$providerComponent action=$action")
-        onStatus(appContext.getString(org.fcitx.fcitx5.android.R.string.voice_status_connecting))
-        tlogI("Binding voice input provider: component=$providerComponent action=$action")
-        val bound = try {
-            service.bindService(
-                Intent(action).apply { component = providerComponent },
-                connection,
-                Context.BIND_AUTO_CREATE,
-            )
-        } catch (e: SecurityException) {
-            Timber.w(e, "bind denied"); false
-        } catch (e: RuntimeException) {
-            Timber.w(e, "bind failed"); false
-        }
-        logI("bindService returned $bound")
-        if (!bound) {
+        // Rebind to the (already running) provider after a ready timeout. Keeps the
+        // pre-roll capture and session state intact; only the AIDL connection is
+        // recreated so the provider starts a fresh session generation.
+        fun rebindForRetry(previous: ServiceConnection) {
+            runCatching { service.unbindService(previous) }
+                .onFailure { Timber.w(it, "unbind before rebind") }
             activeConnection = null
-            activeCallback = null
+            activeProvider = null
             activeProviderBinder = null
             activeProviderDeathRecipient = null
-            logW("bindService returned false")
-            onStatus(appContext.getString(org.fcitx.fcitx5.android.R.string.voice_status_opening))
-            // Pre-roll is no longer useful (no AIDL provider to feed); release the mic.
-            activeCapture?.let {
-                runCatching { it.stop() }.onFailure { Timber.w(it, "stop pre-roll on bind-failed") }
+        }
+
+        lateinit var attemptBind: () -> Unit
+        attemptBind = fun() {
+            val connection = object : ServiceConnection {
+                override fun onServiceConnected(name: ComponentName, binder: IBinder) {
+                    logI("provider connected: $name")
+                    tlogI("Voice input provider connected: $name")
+                    activeProviderBinder = binder
+                    val deathRecipient = IBinder.DeathRecipient {
+                        logW("provider binder died: $name")
+                        service.lifecycleScope.launch { abortActiveVoiceSession(appContext.getString(org.fcitx.fcitx5.android.R.string.voice_error_disconnected)) }
+                    }
+                    activeProviderDeathRecipient = deathRecipient
+                    try {
+                        binder.linkToDeath(deathRecipient, 0)
+                    } catch (e: RemoteException) {
+                        Timber.w(e, "provider binder already dead")
+                        abortActiveVoiceSession(appContext.getString(org.fcitx.fcitx5.android.R.string.voice_error_disconnected))
+                        return
+                    }
+                    val provider = IVoiceInputProvider.Stub.asInterface(binder)
+                    activeProvider = provider
+                    activeProviderId = id
+                    activeSessionConfig = getPreferredSessionConfig(provider)
+                    val stillActiveSession = activeConnection === this &&
+                        activeCallback === callback &&
+                        sessionActive &&
+                        !voiceSessionTerminalized
+                    if (!stillActiveSession) {
+                        logI("provider connected while no active voice session; keeping warm only")
+                        return
+                    }
+                    // The provider is connected, but the session is not usable until it
+                    // reports onReady (model loads asynchronously). Reflect that in the UI
+                    // so the user isn't left staring at "connecting".
+                    if (!sessionReady) {
+                        onStatus(appContext.getString(org.fcitx.fcitx5.android.R.string.voice_status_loading))
+                    }
+                    if (!callProviderSafely(onError) {
+                            configureProvider(provider, activeSessionConfig)
+                            provider.startSession(callback)
+                        }) {
+                        stopSession(service, keepConnectionWarm = false)
+                    }
+                }
+
+                override fun onServiceDisconnected(name: ComponentName) {
+                    logI("provider disconnected: $name")
+                    abortActiveVoiceSession(appContext.getString(org.fcitx.fcitx5.android.R.string.voice_error_disconnected))
+                }
+
+                override fun onBindingDied(name: ComponentName) {
+                    logW("provider binding died: $name")
+                    abortActiveVoiceSession(appContext.getString(org.fcitx.fcitx5.android.R.string.voice_error_disconnected))
+                }
+
+                override fun onNullBinding(name: ComponentName) {
+                    logW("provider null binding: $name")
+                    abortActiveVoiceSession(appContext.getString(org.fcitx.fcitx5.android.R.string.voice_error_null_binding))
+                }
             }
-            activeCapture = null
-            resetPreRoll()
-            val floatingComponent = startFloatingFallback(service, providerComponent)
-            if (floatingComponent != null) {
-                sessionActive = false
-                finishing = false
-                floatingFallbackActive = true
-                floatingFallbackComponent = floatingComponent
-                onStatus(appContext.getString(org.fcitx.fcitx5.android.R.string.voice_status_loading))
-                service.lifecycleScope.launch {
-                    delay(1200)
-                    onStatus(appContext.getString(org.fcitx.fcitx5.android.R.string.voice_status_floating_ready))
+            connectionRef = connection
+            activeConnection = connection
+            bindAttempt++
+            logI("binding provider component=$providerComponent action=$action attempt=$bindAttempt")
+            onStatus(appContext.getString(org.fcitx.fcitx5.android.R.string.voice_status_connecting))
+            tlogI("Binding voice input provider: component=$providerComponent action=$action")
+            val bound = try {
+                service.bindService(
+                    Intent(action).apply {
+                        component = providerComponent
+                        // Wake the provider even from a stopped state (user swiped it
+                        // away or force-stopped it), otherwise the bind is rejected.
+                        addFlags(Intent.FLAG_INCLUDE_STOPPED_PACKAGES)
+                    },
+                    connection,
+                    Context.BIND_AUTO_CREATE,
+                )
+            } catch (e: SecurityException) {
+                Timber.w(e, "bind denied"); false
+            } catch (e: RuntimeException) {
+                Timber.w(e, "bind failed"); false
+            }
+            logI("bindService returned $bound")
+            if (!bound) {
+                // Even when bindService returns false the ServiceConnection is
+                // registered and must be unbound, or it leaks (ServiceConnectionLeaked
+                // at IMS destroy). This is the common OEM case where the plugin process
+                // was force-stopped: the bind is rejected but the connection lingers.
+                runCatching { service.unbindService(connection) }
+                    .onFailure { Timber.w(it, "unbind after failed bind") }
+                activeConnection = null
+                activeCallback = null
+                activeProviderBinder = null
+                activeProviderDeathRecipient = null
+                logW("bindService returned false")
+                onStatus(appContext.getString(org.fcitx.fcitx5.android.R.string.voice_status_opening))
+                // Pre-roll is no longer useful (no AIDL provider to feed); release the mic.
+                activeCapture?.let {
+                    runCatching { it.stop() }.onFailure { Timber.w(it, "stop pre-roll on bind-failed") }
+                }
+                activeCapture = null
+                resetPreRoll()
+                val floatingComponent = startFloatingFallback(service, providerComponent)
+                if (floatingComponent != null) {
+                    sessionActive = false
+                    finishing = false
+                    floatingFallbackActive = true
+                    floatingFallbackComponent = floatingComponent
+                    onStatus(appContext.getString(org.fcitx.fcitx5.android.R.string.voice_status_loading))
+                    service.lifecycleScope.launch {
+                        delay(1200)
+                        onStatus(appContext.getString(org.fcitx.fcitx5.android.R.string.voice_status_floating_ready))
+                    }
+                } else {
+                    onStatus("")
+                    onError(appContext.getString(org.fcitx.fcitx5.android.R.string.voice_error_cannot_bind))
+                    stopSession(service, keepConnectionWarm = false)
                 }
             } else {
-                onStatus("")
-                onError(appContext.getString(org.fcitx.fcitx5.android.R.string.voice_error_cannot_bind))
-                stopSession(service, keepConnectionWarm = false)
-            }
-        } else {
-            service.lifecycleScope.launch {
-                delay(ACTIVE_BIND_TIMEOUT_MS)
-                if (!voiceSessionTerminalized && activeConnection === connection && activeProvider == null) {
-                    logW("provider bind timed out without onServiceConnected")
-                    abortActiveVoiceSession(appContext.getString(org.fcitx.fcitx5.android.R.string.voice_error_bind_timeout))
+                service.lifecycleScope.launch {
+                    delay(ACTIVE_BIND_TIMEOUT_MS)
+                    if (!voiceSessionTerminalized && activeConnection === connection && activeProvider == null) {
+                        logW("provider bind timed out without onServiceConnected")
+                        abortActiveVoiceSession(appContext.getString(org.fcitx.fcitx5.android.R.string.voice_error_bind_timeout))
+                    }
+                }
+                // Second guard: the provider may connect quickly but never emit onReady
+                // (e.g. a cold-start model load hangs). Retry the bind once before giving
+                // up so the IME never stays stuck in "connecting"/"loading" indefinitely.
+                service.lifecycleScope.launch {
+                    delay(ACTIVE_READY_TIMEOUT_MS)
+                    if (!voiceSessionTerminalized && activeConnection === connection && !sessionReady) {
+                        if (bindAttempt < MAX_BIND_ATTEMPTS) {
+                            logW("provider ready timed out; rebinding (attempt $bindAttempt)")
+                            onStatus(appContext.getString(org.fcitx.fcitx5.android.R.string.voice_status_connecting))
+                            rebindForRetry(connection)
+                            attemptBind()
+                        } else {
+                            logW("provider ready timed out without onReady after retry")
+                            abortActiveVoiceSession(appContext.getString(org.fcitx.fcitx5.android.R.string.voice_error_bind_timeout))
+                        }
+                    }
                 }
             }
         }
+        attemptBind()
     }
 
     private fun startFloatingFallback(
@@ -571,7 +671,10 @@ object VoiceInputProviderManager {
         val action = BuildConfig.APPLICATION_ID + VoiceInputIpc.START_FLOATING_ACTION_SUFFIX
         val serviceClass = providerComponent.className.substringBeforeLast('.') + ".FloatingService"
         val component = ComponentName(providerComponent.packageName, serviceClass)
-        val intent = Intent(action).apply { this.component = component }
+        val intent = Intent(action).apply {
+            this.component = component
+            addFlags(Intent.FLAG_INCLUDE_STOPPED_PACKAGES)
+        }
         return try {
             ContextCompat.startForegroundService(service, intent)
             logI("started floating fallback component=${intent.component} action=$action")

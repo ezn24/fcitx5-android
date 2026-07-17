@@ -555,6 +555,8 @@
     <string name="text_keyboard_layout_layout_height_override">Layout-specific keyboard height</string>
     <string name="text_keyboard_layout_layout_height_override_title">Layout height: %1$s</string>
     <string name="text_keyboard_layout_use_global_height">Use global keyboard height</string>
+    <string name="text_keyboard_layout_height_portrait">Portrait</string>
+    <string name="text_keyboard_layout_height_landscape">Landscape</string>
     <string name="text_keyboard_layout_layout_height_percent_hint">10 - 90</string>
     <string name="text_keyboard_layout_layout_height_percent_invalid">Layout keyboard height must be between 10 and 90</string>
     <string name="text_keyboard_layout_layout_height_percent_helper">When enabled, this layout overrides global keyboard height. Leave it global to follow system keyboard height settings.</string>
@@ -738,6 +740,7 @@
     <string name="text_keyboard_layout_qr_import_image">Import from QR image</string>
     <string name="text_keyboard_layout_qr_share_title">Share layout QR image</string>
     <string name="text_keyboard_layout_qr_exported">QR long image generated, choose an app to share</string>
+    <string name="text_keyboard_layout_qr_share_no_handler">No app available to share this image</string>
     <string name="text_keyboard_layout_qr_export_failed">Failed to generate QR image: %1$s</string>
     <string name="text_keyboard_layout_qr_scan_prompt">Scan all QR chunks in order</string>
     <string name="text_keyboard_layout_qr_camera_permission_denied">Camera permission denied</string>

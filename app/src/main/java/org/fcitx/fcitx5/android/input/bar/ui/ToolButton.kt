@@ -15,6 +15,7 @@ import android.graphics.drawable.StateListDrawable
 import android.graphics.drawable.shapes.OvalShape
 import android.graphics.drawable.ShapeDrawable
 import android.view.View
+import android.view.ViewPropertyAnimator
 import android.widget.ImageView
 import androidx.annotation.ColorInt
 import androidx.annotation.DrawableRes
@@ -56,8 +57,16 @@ class ToolButton(context: Context) : CustomGestureView(context) {
 
     private var theme: Theme? = null
     private var isActive: Boolean = false
+    private var usingCustomDrawable: Boolean = false
+    private var customDrawableTintWithTheme: Boolean = false
     @ColorInt
     private var pressHighlightColor: Int = Color.TRANSPARENT
+
+    var iconRotation: Float
+        get() = image.rotation
+        set(value) {
+            image.rotation = value
+        }
 
     constructor(context: Context, @DrawableRes icon: Int, theme: Theme) : this(context) {
         this.theme = theme
@@ -69,19 +78,30 @@ class ToolButton(context: Context) : CustomGestureView(context) {
         add(textView, lParams(wrapContent, wrapContent, gravityCenter))
     }
 
+    fun iconAnimate(): ViewPropertyAnimator = image.animate()
+
     fun setIcon(@DrawableRes icon: Int) {
+        usingCustomDrawable = false
         textView.visibility = View.GONE
         image.visibility = View.VISIBLE
-        image.imageTintList = theme?.let { ColorStateList.valueOf(it.altKeyTextColor) }
+        image.imageTintList = currentIconColor()?.let { ColorStateList.valueOf(it) }
         image.imageResource = icon
     }
 
-    fun setIconFromDrawable(drawable: Drawable?) {
+    fun setIconFromDrawable(drawable: Drawable?, tintWithTheme: Boolean = true) {
         if (drawable != null) {
+            usingCustomDrawable = true
+            customDrawableTintWithTheme = tintWithTheme
             textView.visibility = View.GONE
             image.visibility = View.VISIBLE
-            image.imageTintList = null
-            image.imageDrawable = drawable
+            image.imageDrawable = drawable.mutate()
+            if (tintWithTheme) {
+                image.imageTintList = null
+                currentIconColor()?.let { image.imageDrawable?.setTint(it) }
+            } else {
+                image.imageTintList = null
+                image.imageDrawable?.setTintList(null)
+            }
         }
     }
 
@@ -110,10 +130,26 @@ class ToolButton(context: Context) : CustomGestureView(context) {
 
     private fun updateAppearance() {
         val theme = theme ?: return
-        val iconColor = if (isActive) theme.accentKeyBackgroundColor else theme.altKeyTextColor
-        image.imageTintList = ColorStateList.valueOf(iconColor)
+        val iconColor = currentIconColor()
+        if (usingCustomDrawable) {
+            if (customDrawableTintWithTheme) {
+                image.imageTintList = null
+                if (iconColor != null) image.imageDrawable?.setTint(iconColor)
+            } else {
+                image.imageTintList = null
+                image.imageDrawable?.setTintList(null)
+            }
+        } else {
+            image.imageTintList = iconColor?.let { ColorStateList.valueOf(it) }
+        }
         textView.setTextColor(theme.altKeyTextColor)
         applyBackground()
+    }
+
+    @ColorInt
+    private fun currentIconColor(): Int? {
+        val theme = theme ?: return null
+        return if (isActive) theme.accentKeyBackgroundColor else theme.altKeyTextColor
     }
 
     private fun applyBackground() {

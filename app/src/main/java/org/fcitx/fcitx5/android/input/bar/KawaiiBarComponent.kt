@@ -22,6 +22,7 @@ import android.widget.inline.InlineContentView
 import androidx.annotation.Keep
 import androidx.annotation.RequiresApi
 import androidx.lifecycle.lifecycleScope
+import java.io.File
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -55,9 +56,11 @@ import org.fcitx.fcitx5.android.input.bar.ui.CandidateUi
 import org.fcitx.fcitx5.android.input.bar.ui.IdleUi
 import org.fcitx.fcitx5.android.input.bar.ui.TitleUi
 import org.fcitx.fcitx5.android.input.voice.VoiceInputProviderManager
+import org.fcitx.fcitx5.android.input.config.ButtonIconFile
 import org.fcitx.fcitx5.android.input.config.ButtonsLayoutConfig
 import org.fcitx.fcitx5.android.input.config.ConfigProviders
 import org.fcitx.fcitx5.android.input.config.ConfigurableButton
+import org.fcitx.fcitx5.android.input.bar.ui.ToolButton
 import org.fcitx.fcitx5.android.input.broadcast.InputBroadcastReceiver
 import org.fcitx.fcitx5.android.input.candidates.expanded.ExpandedCandidateStyle
 import org.fcitx.fcitx5.android.input.candidates.expanded.window.FlexboxExpandedCandidateWindow
@@ -97,10 +100,8 @@ import kotlin.coroutines.resume
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.atan2
-import kotlin.math.cos
 import kotlin.math.hypot
 import kotlin.math.min
-import kotlin.math.sin
 
 private const val VOICE_INPUT_TAG = "FcitxVoiceInput"
 
@@ -267,49 +268,40 @@ class KawaiiBarComponent : UniqueViewComponent<KawaiiBarComponent, FrameLayout>(
     // - If horizontal is dominant and left, show number row (when allowed).
     // - If vertical is dominant and down, hide keyboard.
     private val swipeHideKeyboardCallback = CustomGestureView.OnGestureListener { v, e ->
+        require(v is ToolButton)
         val numberRowAvailable = isCapabilityFlagsPassword && !isKeyboardLayoutNumber
         if (numberRowAvailable) {
             val dir = if (context.resources.configuration.layoutDirection == View.LAYOUT_DIRECTION_LTR) 1 else -1
-            // We can't access the rawX and rawY of the MotionEvent, so we need to do some math.
-            // `e.x` and `e.y` are relative to the view's top-left corner, we want to rotate
-            // around the center of the view, so we translate them to be relative to the center
-            val relX = e.x - v.width / 2f
-            val relY = e.y - v.height / 2f
+            // `e.x` and `e.y` are relative to the view's top-left corner
+            val centerX = e.x - v.width / 2f
+            val centerY = e.y - v.height / 2f
 
-            // rotate the relative coordinates by current rotation to get absolute coordinates
+            val distance = hypot(centerX, centerY)
             // the button is ↓, so apply -90 degrees offset
-            val theta = Math.toRadians(v.rotation.toDouble()) - PI / 2
-            val c = cos(theta)
-            val s = sin(theta)
-            val screenX = c * relX - s * relY
-            val screenY = s * relX + c * relY
-            val distance = hypot(screenX, screenY)
-            var angle = Math.toDegrees(atan2(screenY, screenX)).toFloat()
+            var angle = atan2(-centerX, centerY) * (180f / PI.toFloat())
 
             when (e.type) {
                 CustomGestureView.GestureType.Move -> {
                     angle = if (angle in -45f..45f) {
                         angle.coerceIn(-10f, 10f)
                     } else abs(angle).coerceIn(90f - 10f, 90f + 10f) * dir
-                    v.rotation = angle
+                    v.iconRotation = angle
                 }
                 CustomGestureView.GestureType.Up -> {
-                    val thresholdX = (v as CustomGestureView).swipeThresholdX
-                    val thresholdY = v.swipeThresholdY
                     val handled = when (angle) {
-                        in -45f..45f if distance > thresholdY -> {
+                        in -45f..45f if distance > v.swipeThresholdY -> {
                             hideKeyboardAndExitAdjustingMode()
                             true
                         }
-                        !in -45f..45f if distance > thresholdX -> {
-                            v.rotation = 90f * dir
+                        !in -45f..45f if distance > v.swipeThresholdX -> {
+                            v.iconRotation = 90f * dir
                             numberRowState = NumberRowState.ForceShow
                             evalIdleUiState(fromUser = true)
                             true
                         }
                         else -> false
                     }
-                    v.rotation = 0f
+                    v.iconRotation = 0f
                     return@OnGestureListener handled
                 }
                 else -> {}
@@ -356,7 +348,7 @@ class KawaiiBarComponent : UniqueViewComponent<KawaiiBarComponent, FrameLayout>(
 
     // Load buttons config from file or use default
     // Note: 'more' button is always added automatically at the end if not present in config
-    private fun loadButtonsConfig(): List<ConfigurableButton> {
+    private fun loadButtonsConfig(): Triple<List<ConfigurableButton>, ConfigurableButton, ConfigurableButton> {
         val snapshot = ConfigProviders.readButtonsLayoutConfig<ButtonsLayoutConfig>()
         val config = snapshot?.value ?: ButtonsLayoutConfig.default()
 
@@ -366,7 +358,18 @@ class KawaiiBarComponent : UniqueViewComponent<KawaiiBarComponent, FrameLayout>(
         }
 
         // Always add 'more' button at the end
-        return filteredButtons + ConfigurableButton("more")
+        val buttons = filteredButtons + ConfigurableButton("more")
+
+        // Update watched icon filenames for hot-reload
+        val allButtons = buttons + listOf(config.toolbarToggleButton, config.hideKeyboardButton)
+        val iconFileNames = allButtons
+            .mapNotNull { it.icon }
+            .filter { it.startsWith(ButtonIconFile.PREFIX) }
+            .map { it.removePrefix(ButtonIconFile.PREFIX).substringAfterLast('/') }
+            .toSet()
+        ConfigProviders.setWatchedIconFileNames(iconFileNames)
+
+        return Triple(buttons, config.toolbarToggleButton, config.hideKeyboardButton)
     }
 
     private fun isPinyinInputMethod(entry: InputMethodEntry = fcitx.runImmediately { inputMethodEntryCached }): Boolean {
@@ -384,7 +387,7 @@ class KawaiiBarComponent : UniqueViewComponent<KawaiiBarComponent, FrameLayout>(
     }
 
     private fun chttransText(actions: Array<Action> = fcitx.runImmediately { statusAreaActionsCached }): String {
-        return if (chttransAction(actions)?.icon == "fcitx-chttrans-active") "繁" else "简"
+        return if (chttransAction(actions)?.icon == "fcitx-chttrans-active") "\u7e41" else "\u7b80"
     }
 
     private var lastChttransText: String? = null
@@ -399,17 +402,24 @@ class KawaiiBarComponent : UniqueViewComponent<KawaiiBarComponent, FrameLayout>(
 
     private var _idleUi: IdleUi? = null
     private var currentButtonsConfig: List<ConfigurableButton> = emptyList()
+    private var currentToolbarToggleConfig: ConfigurableButton = ConfigurableButton("toolbar_toggle")
+    private var currentHideKeyboardConfig: ConfigurableButton = ConfigurableButton("hide_keyboard")
     
     private val idleUi: IdleUi
         get() {
             if (_idleUi == null) {
-                currentButtonsConfig = loadButtonsConfig()
+                val (buttons, toolbarToggle, hideKeyboard) = loadButtonsConfig()
+                currentButtonsConfig = buttons
+                currentToolbarToggleConfig = toolbarToggle
+                currentHideKeyboardConfig = hideKeyboard
                 _idleUi = IdleUi(
                     context,
                     theme,
                     popup,
                     commonKeyActionListener,
                     currentButtonsConfig,
+                    toolbarToggleConfig = currentToolbarToggleConfig,
+                    hideKeyboardConfig = currentHideKeyboardConfig,
                     buttonTextResolver = ::resolveButtonText
                 )
                 setupIdleUiCallbacks(_idleUi!!)
@@ -572,13 +582,80 @@ class KawaiiBarComponent : UniqueViewComponent<KawaiiBarComponent, FrameLayout>(
 
     // Reload Kawaii Bar buttons config (called when config file changes)
     fun reloadButtonsConfig() {
-        val newConfig = loadButtonsConfig()
-        if (newConfig != currentButtonsConfig) {
-            currentButtonsConfig = newConfig
+        val (newButtons, newToolbarToggle, newHideKeyboard) = loadButtonsConfig()
+        val buttonsChanged = newButtons != currentButtonsConfig
+        val systemButtonsChanged = newToolbarToggle != currentToolbarToggleConfig ||
+            newHideKeyboard != currentHideKeyboardConfig
+        if (buttonsChanged || systemButtonsChanged) {
+            cleanupOrphanedIconFiles(
+                currentButtonsConfig, newButtons,
+                currentToolbarToggleConfig, newToolbarToggle,
+                currentHideKeyboardConfig, newHideKeyboard
+            )
+        }
+        if (buttonsChanged) {
+            currentButtonsConfig = newButtons
             lastChttransText = null
-            _idleUi?.buttonsUi?.updateConfig(newConfig)
+            _idleUi?.buttonsUi?.updateConfig(newButtons)
             _idleUi?.let { setupCustomActionListeners(it) }
             updateButtonsState()
+        }
+        if (systemButtonsChanged) {
+            currentToolbarToggleConfig = newToolbarToggle
+            currentHideKeyboardConfig = newHideKeyboard
+            _idleUi?.updateSystemButtonConfigs(newToolbarToggle, newHideKeyboard)
+        }
+    }
+
+    // Reload button icons from disk (called when icon files change on disk)
+    fun reloadButtonIcons() {
+        _idleUi?.buttonsUi?.reloadIcons()
+        _idleUi?.reloadSystemButtonIcons()
+    }
+
+    private fun extractIconFileNames(buttons: List<ConfigurableButton>): Set<String> {
+        return buttons
+            .mapNotNull { it.icon }
+            .filter { it.startsWith(ButtonIconFile.PREFIX) }
+            .map { it.removePrefix(ButtonIconFile.PREFIX).substringAfterLast('/') }
+            .toSet()
+    }
+
+    private fun getAllReferencedIconFileNames(): Set<String> {
+        val snapshot = ConfigProviders.readButtonsLayoutConfig<ButtonsLayoutConfig>()
+        if (snapshot == null) return emptySet()
+        val config = snapshot.value
+        val allButtons = config.kawaiiBarButtons + config.statusAreaButtons +
+            listOf(config.toolbarToggleButton, config.hideKeyboardButton)
+        return extractIconFileNames(allButtons)
+    }
+
+    private fun cleanupOrphanedIconFiles(
+        oldKawaiiButtons: List<ConfigurableButton>,
+        newKawaiiButtons: List<ConfigurableButton>,
+        oldToolbarToggle: ConfigurableButton = ConfigurableButton("toolbar_toggle"),
+        newToolbarToggle: ConfigurableButton = ConfigurableButton("toolbar_toggle"),
+        oldHideKeyboard: ConfigurableButton = ConfigurableButton("hide_keyboard"),
+        newHideKeyboard: ConfigurableButton = ConfigurableButton("hide_keyboard")
+    ) {
+        val oldIcons = extractIconFileNames(oldKawaiiButtons) +
+            extractIconFileNames(listOf(oldToolbarToggle, oldHideKeyboard))
+        val newLocalIcons = extractIconFileNames(newKawaiiButtons) +
+            extractIconFileNames(listOf(newToolbarToggle, newHideKeyboard))
+        // Icons that were in the old config but not in the new local config
+        val removed = oldIcons - newLocalIcons
+        if (removed.isEmpty()) return
+        // But don't delete if still referenced by any button in the full config
+        val allNewIcons = getAllReferencedIconFileNames()
+        val orphaned = removed - allNewIcons
+        if (orphaned.isEmpty()) return
+        val extDir = context.getExternalFilesDir(null) ?: return
+        val iconDir = File(extDir, ButtonIconFile.DIR)
+        orphaned.forEach { filename ->
+            val file = File(iconDir, filename)
+            if (file.exists() && file.isFile) {
+                try { file.delete() } catch (_: Exception) { }
+            }
         }
     }
 

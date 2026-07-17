@@ -111,6 +111,15 @@ class KeyboardWindow : InputWindow.SimpleInputWindow<KeyboardWindow>(), Essentia
     }
 
     /**
+     * Refresh only the currently visible keyboard layout.
+     * Lightweight alternative to [refreshAllKeyboards] used e.g. after toggling
+     * floating mode to force alt-text layout recalculation.
+     */
+    fun refreshCurrentKeyboard() {
+        currentKeyboard?.refreshStyle()
+    }
+
+    /**
      * Check and apply font refresh if needed.
      * Call this when keyboard is about to show.
      */
@@ -253,6 +262,14 @@ class KeyboardWindow : InputWindow.SimpleInputWindow<KeyboardWindow>(), Essentia
         }
         applyEffectiveTextLayer()
         switchLayout(TextKeyboard.Name, remember = false)
+    }
+
+    fun switchLayer(mode: KeyAction.LayerSwitchMode, target: String) {
+        handleLayerSwitchAction(KeyAction.LayerSwitchAction(mode, target))
+    }
+
+    fun consumeOneShotLayer() {
+        consumeOneShotLayerIfNeeded(KeyAction.MacroConsumedAction)
     }
 
     override fun onStartInput(info: EditorInfo, capFlags: CapabilityFlags) {

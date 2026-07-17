@@ -18,6 +18,7 @@ import org.fcitx.fcitx5.android.input.FcitxInputMethodService
 import org.fcitx.fcitx5.android.input.action.ButtonAction
 import org.fcitx.fcitx5.android.input.bar.KawaiiBarComponent
 import org.fcitx.fcitx5.android.input.bar.ui.ToolButton
+import org.fcitx.fcitx5.android.input.config.ButtonIconFile
 import org.fcitx.fcitx5.android.input.config.ButtonsLayoutConfig
 import org.fcitx.fcitx5.android.input.config.ConfigurableButton
 import splitties.dimensions.dp
@@ -71,6 +72,20 @@ class ButtonsBarUi(
         }
     }
 
+    /**
+     * Reload icons from disk for all buttons that use file-based custom icons.
+     * Call this when icon files have changed on disk to refresh button drawables
+     * without rebuilding the entire adapter.
+     */
+    fun reloadIcons() {
+        buttons.forEach { config ->
+            val button = buttonMap[config.id] ?: return@forEach
+            if (config.icon != null && config.icon.startsWith("file:")) {
+                applyIconAndText(button, config)
+            }
+        }
+    }
+
     fun setOnClickListener(buttonId: String, listener: View.OnClickListener?) {
         if (listener != null) {
             clickListeners[buttonId] = listener
@@ -106,11 +121,7 @@ class ButtonsBarUi(
     }
 
     private fun loadFileIcon(path: String): Drawable? {
-        return try {
-            Drawable.createFromPath(path)
-        } catch (_: Exception) {
-            null
-        }
+        return ButtonIconFile.loadDrawable(path)
     }
 
     private fun applyIconAndText(button: ToolButton, config: ConfigurableButton) {
@@ -120,10 +131,10 @@ class ButtonsBarUi(
         } else if (!config.text.isNullOrEmpty()) {
             button.setText(config.text)
         } else if (config.icon != null && config.icon.startsWith("file:")) {
-            val path = config.icon.removePrefix("file:")
-            val drawable = loadFileIcon(path)
+            val drawable = loadFileIcon(config.icon)
             if (drawable != null) {
-                button.setIconFromDrawable(drawable)
+                val tintWithTheme = ButtonIconFile.shouldTintIcon(config.icon)
+                button.setIconFromDrawable(drawable, tintWithTheme = tintWithTheme)
             }
         }
     }

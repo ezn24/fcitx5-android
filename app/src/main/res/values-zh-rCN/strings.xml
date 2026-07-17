@@ -526,6 +526,7 @@
     <string name="special_key_oval_shape">使用 Gboard 风格的操作按键</string>
 
     <!-- Text Keyboard Layout Editor -->
+    <string name="edit_text_playground">文本框测试区</string>
     <string name="edit_text_keyboard_layout">修改键盘定义</string>
     <string name="text_keyboard_layout_file_select_title">切换键盘定义配置</string>
     <string name="web_editor_bridge_title">在线编辑器</string>
@@ -544,6 +545,8 @@
     <string name="text_keyboard_layout_layout_height_override">布局专用键盘高度</string>
     <string name="text_keyboard_layout_layout_height_override_title">布局高度：%1$s</string>
     <string name="text_keyboard_layout_use_global_height">使用全局键盘高度</string>
+    <string name="text_keyboard_layout_height_portrait">竖屏</string>
+    <string name="text_keyboard_layout_height_landscape">横屏</string>
     <string name="text_keyboard_layout_layout_height_percent_hint">10 - 90</string>
     <string name="text_keyboard_layout_layout_height_percent_invalid">布局键盘高度必须在 10 到 90 之间</string>
     <string name="text_keyboard_layout_layout_height_percent_helper">关闭“使用全局键盘高度”后，本布局将覆盖全局键盘高度。保持开启则继续跟随全局设置。</string>
@@ -676,11 +679,11 @@
     <string name="macro_editor_step_shortcut_multiple_keys">步骤 %1$d 只能有一个目标按键</string>
     <string name="macro_editor_step_edit_action_required">步骤 %1$d 需要选择一个操作</string>
     <string name="macro_editor_step_app_action_required">步骤 %1$d 需要选择一个应用动作</string>
-    <string name="macro_editor_step_layer_target_required">步骤 %1$d 需要填写目标布局</string>
-    <string name="macro_editor_step_layer_target_invalid">步骤 %1$d 的目标布局无效</string>
-    <string name="macro_editor_layer_target_hint">点击选择目标布局</string>
-    <string name="macro_editor_layer_target_picker_title">选择目标布局</string>
-    <string name="macro_editor_layer_target_empty">暂无可选布局</string>
+    <string name="macro_editor_step_layer_target_required">步骤 %1$d 需要选择目标层</string>
+    <string name="macro_editor_step_layer_target_invalid">步骤 %1$d 的目标层无效</string>
+    <string name="macro_editor_layer_target_hint">点击选择目标层</string>
+    <string name="macro_editor_layer_target_picker_title">选择目标层</string>
+    <string name="macro_editor_layer_target_empty">暂无可选目标层</string>
     <string name="macro_editor_layer_mode_picker_title">选择切层模式</string>
     <string name="macro_editor_type_change_title">更改步骤类型</string>
     <string name="macro_editor_type_change_message">更改步骤类型将清除当前数据。是否继续？</string>
@@ -722,6 +725,7 @@
     <string name="text_keyboard_layout_qr_import_image">从二维码图片导入</string>
     <string name="text_keyboard_layout_qr_share_title">分享布局二维码图片</string>
     <string name="text_keyboard_layout_qr_exported">二维码长图已生成，请选择应用分享</string>
+    <string name="text_keyboard_layout_qr_share_no_handler">没有可用于分享该图片的应用</string>
     <string name="text_keyboard_layout_qr_export_failed">生成二维码图片失败：%1$s</string>
     <string name="text_keyboard_layout_qr_scan_prompt">请按顺序扫描全部二维码分包</string>
     <string name="text_keyboard_layout_qr_camera_permission_denied">相机权限被拒绝</string>

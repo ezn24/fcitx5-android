@@ -204,7 +204,11 @@ fcitxComponent {
     // exclude (delete immediately after install) tables that nobody would use
     excludeFiles = listOf("cangjie", "erbi", "qxm", "wanfeng").map {
         "usr/share/fcitx5/inputmethod/$it.conf"
-    }
+    } + listOf(
+        // pinyin language model is shipped by the :plugin:pinyin-lm plugin instead
+        "usr/share/libime/zh_CN.lm",
+        "usr/share/libime/zh_CN.lm.predict"
+    )
     installPrebuiltAssets = true
 }
 
@@ -268,6 +272,7 @@ dependencies {
     implementation(libs.xz)
     implementation("org.apache.commons:commons-compress:1.27.1")
     implementation(libs.pictureselector)
+    implementation(libs.androidsvg)
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.test.runner)
     androidTestImplementation(libs.androidx.test.rules)
