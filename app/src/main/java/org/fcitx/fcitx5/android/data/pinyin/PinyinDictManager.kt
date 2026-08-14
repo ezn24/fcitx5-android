@@ -4,6 +4,7 @@
  */
 package org.fcitx.fcitx5.android.data.pinyin
 
+import android.system.Os
 import org.fcitx.fcitx5.android.R
 import org.fcitx.fcitx5.android.core.data.DataManager
 import org.fcitx.fcitx5.android.data.pinyin.dict.BuiltinDictionary
@@ -18,6 +19,8 @@ import java.io.IOException
 import java.io.InputStream
 
 object PinyinDictManager {
+
+    private val managedDataSyncLock = Any()
 
     private val pinyinDicDir = File(
         appContext.getExternalFilesDir(null)!!, "data/pinyin/dictionaries"
@@ -98,14 +101,14 @@ object PinyinDictManager {
         return new
     }
 
-    fun syncManagedData(): SyncResult {
+    fun syncManagedData(): SyncResult = synchronized(managedDataSyncLock) {
         val enabled = mapOf(
             "fcitx5-android-emoji" to true
         )
         val dictionaryChanged = managedDictionarySpecs.map { spec ->
             syncManagedDictionary(spec, enabled.getValue(spec.dictionaryName))
         }.any { it }
-        return SyncResult(
+        SyncResult(
             dictionaryChanged = dictionaryChanged,
             symbolsChanged = syncManagedSymbols()
         )
@@ -159,40 +162,56 @@ object PinyinDictManager {
             Timber.w("Managed dictionary source does not exist: $source")
             return false
         }
-        val marker = File(pinyinDicDir, spec.markerName)
-        val version = listOf(
-            source.length(),
-            source.lastModified(),
-            spec.transformVersion()
-        ).joinToString(":")
-        if (active.exists() && marker.takeIf { it.exists() }?.readText() == version) {
-            return changed
-        }
-
-        val textSource = if (spec.transformLine == null) {
-            source
-        } else {
-            File(appContext.cacheDir, spec.sourceName).also { temp ->
-                temp.bufferedWriter().use { writer ->
-                    source.forEachLine { line ->
-                        writer.appendLine(spec.transformLine.invoke(line))
-                    }
-                }
-            }
-        }
-
+        var textSource: File? = null
+        var convertedDictionary: File? = null
+        var installed = false
         return try {
+            val marker = File(pinyinDicDir, spec.markerName)
+            val version = listOf(
+                source.length(),
+                source.lastModified(),
+                spec.transformVersion()
+            ).joinToString(":")
+            if (active.exists() && marker.takeIf { it.exists() }?.readText() == version) {
+                return changed
+            }
+
+            val conversionSource = if (spec.transformLine == null) {
+                source
+            } else {
+                File.createTempFile("${spec.dictionaryName}-", ".txt", appContext.cacheDir)
+                    .also { temp ->
+                        temp.bufferedWriter().use { writer ->
+                            source.forEachLine { line ->
+                                writer.appendLine(spec.transformLine.invoke(line))
+                            }
+                        }
+                    }
+            }
+            textSource = conversionSource
+
+            val tempOutput = File.createTempFile(
+                "${spec.dictionaryName}-", ".${PinyinDictionary.Type.LibIME.ext}.tmp", pinyinDicDir
+            )
+            convertedDictionary = tempOutput
             pinyinDictConv(
-                textSource.absolutePath,
-                active.absolutePath,
+                conversionSource.absolutePath,
+                tempOutput.absolutePath,
                 MODE_TXT_TO_BIN
             )
+            Os.rename(tempOutput.absolutePath, active.absolutePath)
+            convertedDictionary = null
+            installed = true
             marker.writeText(version)
             true
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to synchronize managed dictionary: ${spec.dictionaryName}")
+            changed || installed
         } finally {
-            if (textSource != source) {
+            if (textSource != null && textSource != source && textSource.exists()) {
                 textSource.delete()
             }
+            convertedDictionary?.delete()
         }
     }
 
