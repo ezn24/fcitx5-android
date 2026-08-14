@@ -32,6 +32,7 @@ object LayoutQrTransferCodec {
     const val TRANSFER_TYPE_LAYOUT = 'L'
     const val TRANSFER_TYPE_POPUP = 'P'
     const val TRANSFER_TYPE_THEME = 'T'
+    const val TRANSFER_TYPE_ICON_THEME = 'I'
     private const val TRANSFER_PROFILE_SEPARATOR = "~"
 
     data class Chunk(
@@ -110,7 +111,7 @@ object LayoutQrTransferCodec {
     fun parseChunk(raw: String): Chunk = decodeChunkLine(raw)
 
     fun detectTransferType(transferId: String): Char? = when (transferId.firstOrNull()) {
-        TRANSFER_TYPE_LAYOUT, TRANSFER_TYPE_POPUP, TRANSFER_TYPE_THEME -> transferId.first()
+        TRANSFER_TYPE_LAYOUT, TRANSFER_TYPE_POPUP, TRANSFER_TYPE_THEME, TRANSFER_TYPE_ICON_THEME -> transferId.first()
         else -> null
     }
 
@@ -173,17 +174,25 @@ object LayoutQrTransferCodec {
     }
 
     private fun compress(raw: ByteArray): ByteArray {
-        // Avoid aggressive high presets on some HarmonyOS/Android devices:
-        // preset 8/9 can request very large allocations (hundreds of MB),
-        // causing process-killing OOM during QR export.
-        val presets = intArrayOf(6, 5, 4, 3)
+        // Prefer the highest preset first and fall back gradually on OOM
+        // (OOM is only logged as a warning; a lower preset is retried).
+        // The dictionary is capped to the input size, so even preset 9 only
+        // needs a few MB for typical QR payloads, and the importing device
+        // needs equally little memory to decompress. niceLen is raised to
+        // the maximum for a better ratio on small payloads.
+        val presets = intArrayOf(9, 8, 7, 6, 5, 4, 3, 2, 1, 0)
         var lastError: Throwable? = null
         for (preset in presets) {
             try {
-                return ByteArrayOutputStream().use { baos ->
-                    XZOutputStream(baos, LZMA2Options(preset)).use { it.write(raw) }
+                val options = LZMA2Options(preset).apply {
+                    dictSize = raw.size.coerceIn(LZMA2Options.DICT_SIZE_MIN, dictSize)
+                    niceLen = LZMA2Options.NICE_LEN_MAX
+                }
+                val compressed = ByteArrayOutputStream().use { baos ->
+                    XZOutputStream(baos, options).use { it.write(raw) }
                     baos.toByteArray()
                 }
+                return compressed
             } catch (oom: OutOfMemoryError) {
                 lastError = oom
                 Log.w(TAG, "LZMA2 preset $preset OOM, retry with lower preset")

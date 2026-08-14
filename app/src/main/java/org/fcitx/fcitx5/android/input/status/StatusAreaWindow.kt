@@ -19,6 +19,7 @@ import org.fcitx.fcitx5.android.core.SubtypeManager
 import org.fcitx.fcitx5.android.daemon.FcitxConnection
 import org.fcitx.fcitx5.android.daemon.launchOnReady
 import org.fcitx.fcitx5.android.data.prefs.AppPrefs
+import org.fcitx.fcitx5.android.data.theme.IconThemeManager
 import org.fcitx.fcitx5.android.data.theme.ThemeManager
 import org.fcitx.fcitx5.android.input.FcitxInputMethodService
 import org.fcitx.fcitx5.android.input.bar.ui.ToolButton
@@ -87,6 +88,10 @@ class StatusAreaWindow : InputWindow.ExtendedInputWindow<StatusAreaWindow>(),
 
     private fun chttransText(actions: Array<Action>): String {
         return if (chttransAction(actions)?.icon == "fcitx-chttrans-active") "繁" else "简"
+    }
+
+    private val iconThemeChangeListener = IconThemeManager.OnIconThemeChangeListener {
+        renderEntries(fcitx.runImmediately { statusAreaActionsCached })
     }
 
     private fun staticEntries(actions: Array<Action>): Array<StatusAreaEntry> {
@@ -380,6 +385,7 @@ class StatusAreaWindow : InputWindow.ExtendedInputWindow<StatusAreaWindow>(),
     override fun onAttached() {
         // Load config when attached
         currentButtonsConfig = loadButtonsConfig()
+        IconThemeManager.addOnChangedListener(iconThemeChangeListener)
         fcitx.launchOnReady {
             val data = it.statusArea()
             service.lifecycleScope.launch {
@@ -389,6 +395,7 @@ class StatusAreaWindow : InputWindow.ExtendedInputWindow<StatusAreaWindow>(),
     }
 
     override fun onDetached() {
+        IconThemeManager.removeOnChangedListener(iconThemeChangeListener)
         popupMenu?.dismiss()
         popupMenu = null
     }

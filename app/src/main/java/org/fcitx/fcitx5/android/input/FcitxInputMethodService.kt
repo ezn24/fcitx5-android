@@ -139,7 +139,7 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
     private lateinit var decorView: View
     private lateinit var contentView: FrameLayout
     internal var inputView: InputView? = null
-    private var candidatesView: CandidatesView? = null
+    internal var candidatesView: CandidatesView? = null
 
     private val navbarMgr = NavigationBarManager()
     internal val inputDeviceManager = InputDeviceManager(
@@ -315,10 +315,15 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
     }
 
     private fun replaceInputView(theme: Theme): InputView {
+        val startedAt = SystemClock.elapsedRealtime()
         val newInputView = InputView(this, fcitx, theme)
         setInputView(newInputView)
         inputDeviceManager.setInputView(newInputView)
         inputView = newInputView
+        android.util.Log.i(
+            "FcitxColdStart",
+            "replaceInputView duration=${SystemClock.elapsedRealtime() - startedAt}ms"
+        )
         return newInputView
     }
 
@@ -330,6 +335,7 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
         contentView.addView(newCandidatesView)
         inputDeviceManager.setCandidatesView(newCandidatesView)
         candidatesView = newCandidatesView
+        candidatesView?.onPositionChanged = { inputView?.updateAuxBarPosition() }
         return newCandidatesView
     }
 
@@ -485,6 +491,8 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
     }
 
     override fun onCreate() {
+        val startedAt = SystemClock.elapsedRealtime()
+        android.util.Log.i("FcitxColdStart", "service.onCreate begin")
         fcitx = FcitxDaemon.connect(javaClass.name)
         lifecycleScope.launch {
             jobs.consumeEach { it.join() }
@@ -533,6 +541,10 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
         decorView = window.window!!.decorView
         contentView = decorView.findViewById(android.R.id.content)
         lastKnownConfig = resources.configuration
+        android.util.Log.i(
+            "FcitxColdStart",
+            "service.onCreate duration=${SystemClock.elapsedRealtime() - startedAt}ms"
+        )
     }
 
     private fun handleFcitxEvent(event: FcitxEvent<*>) {
@@ -735,25 +747,19 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
         val type = editorInfo.inputType and InputType.TYPE_MASK_CLASS
         val variation = editorInfo.inputType and InputType.TYPE_MASK_VARIATION
         if (type == InputType.TYPE_NULL ||
-            // confirm URL suggestion in browser location bar, see also https://bugzilla.mozilla.org/show_bug.cgi?id=1999915
             type == InputType.TYPE_CLASS_TEXT && variation == InputType.TYPE_TEXT_VARIATION_URI
         ) {
             sendDownUpKeyEvents(keyCode)
             return
         }
-        val (start, end) = currentInputSelection
-        val offset = if (start == end) 1 else 0
-        val target = when (keyCode) {
-            KeyEvent.KEYCODE_DPAD_LEFT -> start - offset
-            KeyEvent.KEYCODE_DPAD_RIGHT -> end + offset
-            KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN -> {
-                // For up/down, just send the key event to move by line
+        when (keyCode) {
+            KeyEvent.KEYCODE_DPAD_LEFT,
+            KeyEvent.KEYCODE_DPAD_RIGHT,
+            KeyEvent.KEYCODE_DPAD_UP,
+            KeyEvent.KEYCODE_DPAD_DOWN -> {
                 sendDownUpKeyEvents(keyCode)
-                return
             }
-            else -> return
         }
-        ic.setSelection(target, target)
     }
 
     fun commitText(text: String, cursor: Int = -1) {
@@ -994,7 +1000,13 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
     }
 
     override fun onCreateInputView(): View? {
+        val startedAt = SystemClock.elapsedRealtime()
+        android.util.Log.i("FcitxColdStart", "service.onCreateInputView begin")
         replaceInputViews(ThemeManager.activeTheme)
+        android.util.Log.i(
+            "FcitxColdStart",
+            "service.onCreateInputView duration=${SystemClock.elapsedRealtime() - startedAt}ms"
+        )
         // We will call `setInputView` by ourselves. This is fine.
         return null
     }
@@ -1191,9 +1203,11 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
     private var simulatedAltRightPressedCount = 0
     private var simulatedCapsLockPressedFromMacro = false
     private var simulatedCapsLockOnByMacroTap = false
+    private var virtualShiftLockOn = false
 
     public fun isSimulatedCapsLockOn(): Boolean = simulatedCapsLockOn
     public fun isSimulatedCapsLockOnByMacroTap(): Boolean = simulatedCapsLockOnByMacroTap
+    public fun isVirtualShiftLockOn(): Boolean = virtualShiftLockOn
 
     public fun setVirtualCapsLockState(enabled: Boolean) {
         if (simulatedCapsLockOn == enabled) return
@@ -1204,10 +1218,17 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
         TextKeyboard.refreshCapsPresentationOnAll()
     }
 
+    public fun setVirtualShiftLockState(enabled: Boolean) {
+        if (virtualShiftLockOn == enabled) return
+        virtualShiftLockOn = enabled
+        TextKeyboard.refreshCapsPresentationOnAll()
+    }
+
     private fun onHardwareTypingModeEnter(event: KeyEvent) {
         if (event.keyCode == KeyEvent.KEYCODE_CAPS_LOCK) return
         if (event.unicodeChar == 0) return
         TextKeyboard.clearCapsStateOnAll()
+        setVirtualShiftLockState(false)
         setVirtualCapsLockState(event.isCapsLockOn)
     }
 
@@ -1419,6 +1440,7 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
     }
 
     override fun onStartInput(attribute: EditorInfo, restarting: Boolean) {
+        android.util.Log.i("FcitxColdStart", "service.onStartInput restarting=$restarting")
         isInInputLifecycleCriticalPhase = true
         try {
             val inputSessionGeneration = ++this.inputSessionGeneration
@@ -1448,6 +1470,7 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
     }
 
     override fun onStartInputView(info: EditorInfo, restarting: Boolean) {
+        android.util.Log.i("FcitxColdStart", "service.onStartInputView restarting=$restarting")
         isInInputLifecycleCriticalPhase = true
         try {
             val inputSessionGeneration = this.inputSessionGeneration

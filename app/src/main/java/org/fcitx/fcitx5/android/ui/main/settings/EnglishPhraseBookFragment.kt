@@ -9,6 +9,7 @@ import android.os.Bundle
 import android.view.View
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
@@ -19,6 +20,8 @@ import org.fcitx.fcitx5.android.daemon.FcitxDaemon
 import org.fcitx.fcitx5.android.data.keyboard.EnglishWordManager
 import org.fcitx.fcitx5.android.ui.common.BaseDynamicListUi
 import org.fcitx.fcitx5.android.ui.common.OnItemChangedListener
+import org.fcitx.fcitx5.android.ui.main.EditDeleteMenuProvider
+import org.fcitx.fcitx5.android.ui.main.MainViewModel.ButtonMode
 import org.fcitx.fcitx5.android.utils.importErrorDialog
 import org.fcitx.fcitx5.android.utils.queryFileName
 import org.fcitx.fcitx5.android.utils.toast
@@ -61,9 +64,19 @@ class EnglishPhraseBookFragment : ProgressFragment(), OnItemChangedListener<File
         ui.addOnItemChangedListener(this)
         ui.addTouchCallback()
         ui.setViewModel(viewModel)
-        viewModel.enableToolbarEditButton(phraseBooks.isNotEmpty()) {
-            ui.enterMultiSelect(requireActivity().onBackPressedDispatcher)
-        }
+        viewModel.toolbarButton.value =
+            if (ui.entries.isNotEmpty()) ButtonMode.EDIT else ButtonMode.NONE
+        requireActivity().addMenuProvider(
+            EditDeleteMenuProvider(
+                buttonMode = viewModel.toolbarButton,
+                editButtonAction = { ui.enterMultiSelect(requireActivity().onBackPressedDispatcher) },
+                deleteButtonAction = { ui.deleteSelected(); ui.exitMultiSelect() },
+                menuHost = requireActivity(),
+                lifecycleOwner = viewLifecycleOwner,
+            ),
+            viewLifecycleOwner,
+            Lifecycle.State.STARTED
+        )
         return ui.root
     }
 
@@ -80,9 +93,6 @@ class EnglishPhraseBookFragment : ProgressFragment(), OnItemChangedListener<File
                 withContext(Dispatchers.Main) {
                     ctx.toast(getString(R.string.english_imported_phrases, count))
                     imported?.let { ui.addItem(item = it) }
-                    viewModel.enableToolbarEditButton(ui.entries.isNotEmpty()) {
-                        ui.enterMultiSelect(requireActivity().onBackPressedDispatcher)
-                    }
                 }
                 FcitxDaemon.restartFcitx()
             } catch (e: Exception) {
@@ -111,11 +121,6 @@ class EnglishPhraseBookFragment : ProgressFragment(), OnItemChangedListener<File
     override fun onStart() {
         super.onStart()
         viewModel.setToolbarTitle(getString(R.string.english_manage_phrase_books))
-        if (isInitialized) {
-            viewModel.enableToolbarEditButton(ui.entries.isNotEmpty()) {
-                ui.enterMultiSelect(requireActivity().onBackPressedDispatcher)
-            }
-        }
     }
 
     override fun onStop() {

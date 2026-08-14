@@ -7,6 +7,7 @@ package org.fcitx.fcitx5.android.ui.main.settings.behavior.utils
 import android.util.Log
 import kotlinx.serialization.json.*
 import org.fcitx.fcitx5.android.input.keyboard.*
+import org.fcitx.fcitx5.android.input.keyboard.AuxBarConfig
 
 // Import Macro types explicitly
 import org.fcitx.fcitx5.android.input.keyboard.MacroAction
@@ -153,12 +154,15 @@ object LayoutJsonUtils {
      * 根据当前子模式标签和名称，从 displayText 中解析出正确的显示文本。
      *
      * 优先级：
-     * 1. 匹配 subModeLabel
-     * 2. 匹配 subModeName
-     * 3. 空字符串键 ""
-     * 4. 返回 default
+     * 1. 匹配 schemaId
+     * 2. 匹配 subModeLabel
+     * 3. 匹配 subModeName
+     * 4. 匹配 "default"
+     * 5. 匹配空字符串键 ""
+     * 6. 返回 default 参数
      *
      * @param displayText displayText JSON 元素
+     * @param schemaId 当前方案 ID（从 subMode icon 推导）
      * @param subModeLabel 当前子模式标签
      * @param subModeName 当前子模式名称
      * @param default 默认值
@@ -166,6 +170,7 @@ object LayoutJsonUtils {
      */
     fun resolveDisplayText(
         displayText: JsonElement?,
+        schemaId: String,
         subModeLabel: String,
         subModeName: String,
         default: String
@@ -173,19 +178,28 @@ object LayoutJsonUtils {
         return when {
             displayText == null -> default
             displayText is JsonPrimitive -> displayText.content
-            displayText is JsonObject -> resolveDisplayTextMap(displayText, subModeLabel, subModeName) ?: default
+            displayText is JsonObject -> resolveDisplayTextMap(displayText, schemaId, subModeLabel, subModeName) ?: default
             else -> default
         }
     }
 
     private fun resolveDisplayTextMap(
         map: JsonObject,
+        schemaId: String,
         subModeLabel: String,
         subModeName: String
     ): String? {
-        // 优先级：subModeLabel → subModeName
-        return map[subModeLabel]?.takeIf { it is JsonPrimitive && it !is JsonNull }?.jsonPrimitive?.content
-            ?: map[subModeName]?.takeIf { it is JsonPrimitive && it !is JsonNull }?.jsonPrimitive?.content
+        fun valueOf(key: String): String? {
+            if (key.isBlank()) return null
+            return map[key]?.takeIf { it is JsonPrimitive && it !is JsonNull }?.jsonPrimitive?.content
+        }
+
+        // 与文本键盘子模式匹配一致：schemaId → subModeLabel → subModeName → default → ""
+        return valueOf(schemaId)
+            ?: valueOf(subModeLabel)
+            ?: valueOf(subModeName)
+            ?: map["default"]?.takeIf { it is JsonPrimitive && it !is JsonNull }?.jsonPrimitive?.content
+            ?: map[""]?.takeIf { it is JsonPrimitive && it !is JsonNull }?.jsonPrimitive?.content
     }
 
     /**
@@ -671,13 +685,19 @@ object LayoutJsonUtils {
      * @param subModeName 当前子模式名称（用于解析 displayText）
      * @return 转换后的 KeyDef
      */
-    fun createKeyDef(key: KeyJson, subModeLabel: String = "", subModeName: String = ""): KeyDef {
+    fun createKeyDef(
+        key: KeyJson,
+        subModeLabel: String = "",
+        schemaId: String = "",
+        subModeName: String = ""
+    ): KeyDef {
         val keyDef = when (key.type) {
             "AlphabetKey" -> AlphabetKey(
                 character = key.main ?: "",
                 punctuation = key.alt ?: "",
                 displayText = resolveDisplayText(
                     key.displayText,
+                    schemaId,
                     subModeLabel,
                     subModeName,
                     key.main ?: ""
@@ -786,6 +806,7 @@ object LayoutJsonUtils {
                 val baseLabel = key.label ?: ""
                 val label = resolveDisplayText(
                     key.displayText,
+                    schemaId,
                     subModeLabel,
                     subModeName,
                     baseLabel  // 默认值为基础 label（displayText 中不需要 default 键）
@@ -818,6 +839,7 @@ object LayoutJsonUtils {
             val overrideDef = createKeyDef(
                 override.copy(composeOverride = null, weight = null, rowHeightPercent = null),
                 subModeLabel,
+                schemaId,
                 subModeName
             )
             overrideDef.independentColor = override.independentColor ?: false
@@ -846,17 +868,43 @@ object LayoutJsonUtils {
     fun convertToSaveJson(
         entries: Map<String, List<List<Map<String, Any?>>>>,
         layoutHeightPercentOverrides: Map<String, Int> = emptyMap(),
-        layoutHeightPercentOverridesLandscape: Map<String, Int> = emptyMap()
+        layoutHeightPercentOverridesLandscape: Map<String, Int> = emptyMap(),
+        layoutAuxBarConfigs: Map<String, AuxBarConfig?> = emptyMap(),
+        layoutAuxBarKeys: Map<String, List<Map<String, Any?>>> = emptyMap()
     ): JsonObject {
         val layoutMap = mutableMapOf<String, JsonElement>()
 
-        fun buildHeightMeta(overrideKey: String): JsonObject? {
+        fun buildMeta(overrideKey: String): JsonObject? {
             val portrait = layoutHeightPercentOverrides[overrideKey]?.takeIf { it in 10..90 }
             val landscape = layoutHeightPercentOverridesLandscape[overrideKey]?.takeIf { it in 10..90 }
-            if (portrait == null && landscape == null) return null
+            val auxBarConfig = layoutAuxBarConfigs[overrideKey]
+            if (portrait == null && landscape == null && auxBarConfig == null) return null
             val meta = mutableMapOf<String, JsonElement>()
             portrait?.let { meta["keyboard_height_percent"] = JsonPrimitive(it) }
             landscape?.let { meta["keyboard_height_percent_landscape"] = JsonPrimitive(it) }
+            auxBarConfig?.let { config ->
+                val posStr = when (config.position) {
+                    AuxBarPosition.Top -> "top"
+                    AuxBarPosition.Bottom -> "bottom"
+                    AuxBarPosition.Left -> "left"
+                    AuxBarPosition.Right -> "right"
+                    AuxBarPosition.AbovePreedit -> "above_preedit"
+                }
+                val auxBarObj = mutableMapOf<String, JsonElement>(
+                    "position" to JsonPrimitive(posStr),
+                    "size_percent" to JsonPrimitive(config.sizePercent)
+                )
+                layoutAuxBarKeys[overrideKey]?.takeIf { it.isNotEmpty() }?.let { keys ->
+                    auxBarObj["keys"] = JsonArray(keys.map { keyMap ->
+                        JsonObject(
+                            keyMap
+                                .filterValues { it != null }
+                                .mapValues { (_, v) -> convertToJsonProperty(v) }
+                        )
+                    })
+                }
+                meta["aux_bar"] = JsonObject(auxBarObj)
+            }
             return JsonObject(meta)
         }
 
@@ -875,7 +923,7 @@ object LayoutJsonUtils {
 
             if (hasSubModeKeys) {
                 val subModeMap = mutableMapOf<String, JsonElement>()
-                buildHeightMeta(baseName)?.let { subModeMap["__meta__"] = it }
+                buildMeta(baseName)?.let { subModeMap["__meta__"] = it }
 
                 for (key in subModeKeys) {
                     val subModeLabel = subModeLabelFromEntryKey(key, baseName)
@@ -896,7 +944,7 @@ object LayoutJsonUtils {
                     } else {
                         "$baseName:$subModeLabel"
                     }
-                    val subModeMeta = if (subModeLabel != "default") buildHeightMeta(overrideKey) else null
+                    val subModeMeta = if (subModeLabel != "default") buildMeta(overrideKey) else null
                     subModeMap[subModeLabel] = if (subModeMeta != null) {
                         JsonObject(
                             mapOf(
@@ -923,7 +971,7 @@ object LayoutJsonUtils {
                         )
                     })
                 })
-                val overrideMeta = buildHeightMeta(baseName)
+                val overrideMeta = buildMeta(baseName)
                 layoutMap[baseName] = if (overrideMeta == null) {
                     jsonArray
                 } else {

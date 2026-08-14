@@ -7,11 +7,24 @@ package org.fcitx.fcitx5.android.input.keyboard
 import android.content.Context
 import android.content.res.Configuration
 import android.graphics.Rect
+import android.os.SystemClock
+import android.util.Log
+import android.util.TypedValue
+import android.graphics.Color
+import android.graphics.Typeface
+import android.graphics.drawable.ColorDrawable
+import android.graphics.drawable.Drawable
+import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.InsetDrawable
+import android.graphics.drawable.LayerDrawable
+import android.graphics.drawable.StateListDrawable
 import android.util.SparseIntArray
+import android.view.Gravity
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
+import android.widget.FrameLayout
 import androidx.annotation.CallSuper
 import androidx.annotation.Keep
 import androidx.annotation.DrawableRes
@@ -23,9 +36,12 @@ import androidx.core.view.children
 import androidx.core.view.updateLayoutParams
 import androidx.lifecycle.findViewTreeLifecycleOwner
 import androidx.lifecycle.lifecycleScope
+import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.RecyclerView
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.fcitx.fcitx5.android.R
+import org.fcitx.fcitx5.android.core.AuxBarAction
 import org.fcitx.fcitx5.android.core.FcitxKeyMapping
 import org.fcitx.fcitx5.android.core.InputMethodEntry
 import org.fcitx.fcitx5.android.core.KeyState
@@ -37,6 +53,9 @@ import org.fcitx.fcitx5.android.data.prefs.AppPrefs
 import org.fcitx.fcitx5.android.data.prefs.ManagedPreference
 import org.fcitx.fcitx5.android.data.prefs.SplitKeyboardStateManager
 import org.fcitx.fcitx5.android.data.theme.Theme
+import org.fcitx.fcitx5.android.data.theme.ThemeManager
+import org.fcitx.fcitx5.android.input.keyboard.AuxBarPosition
+import org.fcitx.fcitx5.android.input.AutoScaleTextView
 import org.fcitx.fcitx5.android.input.font.FontProviders
 import org.fcitx.fcitx5.android.input.keyboard.CustomGestureView.GestureType
 import org.fcitx.fcitx5.android.input.keyboard.CustomGestureView.OnGestureListener
@@ -44,6 +63,7 @@ import org.fcitx.fcitx5.android.input.keyboard.CustomGestureView.SwipeAxis
 import org.fcitx.fcitx5.android.input.popup.PopupAction
 import org.fcitx.fcitx5.android.input.popup.PopupActionListener
 import org.fcitx.fcitx5.android.utils.DeviceInfoCollector
+import org.fcitx.fcitx5.android.utils.pressHighlightDrawable
 
 // Import Macro types
 import org.fcitx.fcitx5.android.input.keyboard.MacroAction
@@ -64,6 +84,9 @@ import splitties.views.dsl.constraintlayout.rightToLeftOf
 import splitties.views.dsl.constraintlayout.topOfParent
 import splitties.views.dsl.core.add
 import splitties.views.dsl.core.matchParent
+import splitties.views.dsl.core.wrapContent
+import splitties.views.dsl.recyclerview.recyclerView
+import splitties.views.gravityCenter
 import timber.log.Timber
 import kotlin.math.absoluteValue
 import kotlin.math.max
@@ -72,12 +95,19 @@ import kotlin.math.roundToInt
 abstract class BaseKeyboard(
     context: Context,
     protected var theme: Theme,
-    private val layoutProvider: () ->List<List<KeyDef>>
+    private val layoutProvider: () ->List<List<KeyDef>>,
+    private val auxBarConfigProvider: () -> AuxBarConfig? = { null },
+    private val auxBarKeysProvider: () -> List<KeyDef> = { emptyList() }
 ) : ConstraintLayout(context) {
 
     private val keyLayout: List<List<KeyDef>>
         get() = layoutProvider()
+    private val auxBarConfig: AuxBarConfig?
+        get() = auxBarConfigProvider()
+    private val auxBarKeyDefs: List<KeyDef>
+        get() = auxBarKeysProvider()
     var keyActionListener: KeyActionListener? = null
+    var auxBarListener: ((List<AuxBarAction>, List<AuxBarAction>) -> Unit)? = null
 
     private val prefs = AppPrefs.getInstance()
     private val splitKeyboardManager = SplitKeyboardStateManager.getInstance()
@@ -117,6 +147,14 @@ abstract class BaseKeyboard(
     private var rowHeightPercents: List<Float> = emptyList()
     private var horizontalGapScale = 1f
     private var composing = false
+
+    // Edge zone views
+    private var auxBarInnerContainer: ConstraintLayout? = null
+    private var auxBarScrollableAdapter: AuxBarAdapter? = null
+    private var auxBarPinnedAdapter: AuxBarAdapter? = null
+    private var auxBarScrollableRv: RecyclerView? = null
+    private var auxBarKeyAdapter: AuxBarKeyAdapter? = null
+    private var mainGridContainer: ConstraintLayout? = null
 
     private data class GestureBaseline(
         val swipeEnabled: Boolean,
@@ -170,7 +208,14 @@ abstract class BaseKeyboard(
     }
 
     protected open fun reloadLayout() {
+        val startedAt = SystemClock.elapsedRealtime()
         removeAllViews()
+        auxBarInnerContainer = null
+        auxBarScrollableAdapter = null
+        auxBarPinnedAdapter = null
+        auxBarScrollableRv = null
+        auxBarKeyAdapter = null
+        mainGridContainer = null
         cachedWaterRippleColor = null
         keyboardWaterRippleView = KeyboardWaterRippleView(context).also { rippleView ->
             add(rippleView, lParams(matchParent, matchParent))
@@ -195,22 +240,237 @@ abstract class BaseKeyboard(
                 buildRegularRow(row, keyViews)
             }
         }
-        keyRows.forEachIndexed { index, row ->
-            add(row, lParams {
-                height = 0
-                verticalWeight = rowHeightPercents.getOrElse(index) { 1f }
-                if (index == 0) topOfParent()
-                else below(keyRows[index - 1])
-                if (index == keyRows.size - 1) bottomOfParent()
-                else above(keyRows[index + 1])
-                centerHorizontally()
-            })
+
+        val auxBarConfig = auxBarConfig
+        if (auxBarConfig != null && auxBarConfig.position != AuxBarPosition.AbovePreedit) {
+            val isVertical = auxBarConfig.position == AuxBarPosition.Left || auxBarConfig.position == AuxBarPosition.Right
+            val keyPrefs = ThemeManager.prefs
+            val isLandscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+            val vMargin = dp(
+                (if (isLandscape) keyPrefs.keyVerticalMarginLandscape else keyPrefs.keyVerticalMargin).getValue()
+            )
+            val hMargin = dp(
+                (if (isLandscape) keyPrefs.keyHorizontalMarginLandscape else keyPrefs.keyHorizontalMargin).getValue()
+            )
+            val auxBarInnerLayout = constraintLayout()
+            val scrollableRv = recyclerView {
+                layoutManager = LinearLayoutManager(context).apply {
+                    orientation = if (isVertical) LinearLayoutManager.VERTICAL else LinearLayoutManager.HORIZONTAL
+                }
+                overScrollMode = OVER_SCROLL_NEVER
+                isVerticalScrollBarEnabled = false
+                isHorizontalScrollBarEnabled = false
+            }
+            // Use the dominant text size in the current layout instead of the first
+            // textual key, which may be a small special key.
+            val keyTextSize = rows.asSequence()
+                .flatMap { it.asSequence() }
+                .mapNotNull { (it.appearance as? KeyDef.Appearance.Text)?.textSize }
+                .groupingBy { it }
+                .eachCount()
+                .maxByOrNull { it.value }
+                ?.key ?: 16f
+            val scrollableAdapter = AuxBarAdapter(theme, vMargin, hMargin, auxBarConfig.position, keyTextSize) { id ->
+                keyActionListener?.onKeyAction(KeyAction.AuxBarTrigger(id), KeyActionListener.Source.Keyboard)
+            }
+            scrollableRv.adapter = scrollableAdapter
+            val keyAdapter = AuxBarKeyAdapter(
+                vertical = isVertical,
+                keyViewFactory = { def ->
+                    createKeyView(def, registerComposeAware = false).also(::applyConfiguredFonts)
+                }
+            )
+            val pinnedRv = recyclerView {
+                layoutManager = LinearLayoutManager(context).apply {
+                    orientation = if (isVertical) LinearLayoutManager.VERTICAL else LinearLayoutManager.HORIZONTAL
+                }
+                isNestedScrollingEnabled = false
+                overScrollMode = OVER_SCROLL_NEVER
+                isVerticalScrollBarEnabled = false
+                isHorizontalScrollBarEnabled = false
+            }
+            val pinnedAdapter = AuxBarAdapter(theme, vMargin, hMargin, auxBarConfig.position, keyTextSize) { id ->
+                keyActionListener?.onKeyAction(KeyAction.AuxBarTrigger(id), KeyActionListener.Source.Keyboard)
+            }
+            pinnedRv.adapter = pinnedAdapter
+
+            if (isVertical) {
+                auxBarInnerLayout.add(scrollableRv, lParams {
+                    topOfParent()
+                    centerHorizontally()
+                    above(pinnedRv)
+                })
+                auxBarInnerLayout.add(pinnedRv, lParams(height = wrapContent) {
+                    bottomOfParent()
+                    centerHorizontally()
+                    topMargin = vMargin
+                })
+            } else {
+                auxBarInnerLayout.add(scrollableRv, lParams {
+                    topOfParent()
+                    bottomOfParent()
+                    leftOfParent()
+                    rightToLeftOf(pinnedRv)
+                })
+                auxBarInnerLayout.add(pinnedRv, lParams(width = wrapContent) {
+                    topOfParent()
+                    bottomOfParent()
+                    rightOfParent()
+                    leftMargin = hMargin
+                })
+            }
+
+            val mainGrid = constraintLayout()
+            keyRows.forEachIndexed { index, row ->
+                mainGrid.add(row, lParams {
+                    height = 0
+                    verticalWeight = rowHeightPercents.getOrElse(index) { 1f }
+                    if (index == 0) topOfParent()
+                    else below(keyRows[index - 1])
+                    if (index == keyRows.size - 1) bottomOfParent()
+                    else above(keyRows[index + 1])
+                    centerHorizontally()
+                })
+            }
+
+            val sizeFraction = auxBarConfig.sizePercent / 100f
+            when (auxBarConfig.position) {
+                AuxBarPosition.Left -> {
+                    add(auxBarInnerLayout, lParams {
+                        matchConstraintPercentWidth = sizeFraction
+                        topOfParent(); bottomOfParent(); leftOfParent()
+                    })
+                    add(mainGrid, lParams {
+                        topOfParent(); bottomOfParent(); rightOfParent()
+                        leftToRightOf(auxBarInnerLayout)
+                    })
+                }
+                AuxBarPosition.Right -> {
+                    add(auxBarInnerLayout, lParams {
+                        matchConstraintPercentWidth = sizeFraction
+                        topOfParent(); bottomOfParent(); rightOfParent()
+                    })
+                    add(mainGrid, lParams {
+                        topOfParent(); bottomOfParent(); leftOfParent()
+                        rightToLeftOf(auxBarInnerLayout)
+                    })
+                }
+                AuxBarPosition.Top -> {
+                    add(auxBarInnerLayout, lParams {
+                        matchConstraintPercentHeight = sizeFraction
+                        topOfParent(); leftOfParent(); rightOfParent()
+                    })
+                    add(mainGrid, lParams {
+                        bottomOfParent(); leftOfParent(); rightOfParent()
+                        below(auxBarInnerLayout)
+                    })
+                }
+                AuxBarPosition.Bottom -> {
+                    add(auxBarInnerLayout, lParams {
+                        matchConstraintPercentHeight = sizeFraction
+                        bottomOfParent(); leftOfParent(); rightOfParent()
+                    })
+                    add(mainGrid, lParams {
+                        topOfParent(); leftOfParent(); rightOfParent()
+                        above(auxBarInnerLayout)
+                    })
+                }
+            }
+            auxBarInnerContainer = auxBarInnerLayout
+            auxBarScrollableAdapter = scrollableAdapter
+            auxBarPinnedAdapter = pinnedAdapter
+            auxBarScrollableRv = scrollableRv
+            auxBarKeyAdapter = keyAdapter
+            mainGridContainer = mainGrid
+            // Keep aux bar usable before first candidate update (e.g. in preview or idle startup):
+            // if no tabs are available, show configured fallback keys immediately.
+            applyAuxBarContent(emptyList(), emptyList())
+            keyRows.firstOrNull()?.let { firstRow ->
+                post {
+                    val rowHeight = firstRow.height
+                    if (rowHeight > 0) {
+                        val visualHeight = rowHeight - 2 * vMargin
+                        if (visualHeight > 0) {
+                            scrollableAdapter.setMinItemHeight(visualHeight)
+                            pinnedAdapter.setMinItemHeight(visualHeight)
+                        }
+                        if (rowHeight > 0) {
+                            // KeyView already includes key vertical margins in its own drawing logic,
+                            // so use full row height to keep aux bar key height aligned with normal rows.
+                            keyAdapter.setMinItemHeight(rowHeight)
+                        }
+                    }
+                    auxBarScrollableAdapter?.applyConfiguredFonts(scrollableRv)
+                    auxBarPinnedAdapter?.applyConfiguredFonts(pinnedRv)
+                }
+            }
+        } else {
+            keyRows.forEachIndexed { index, row ->
+                add(row, lParams {
+                    height = 0
+                    verticalWeight = rowHeightPercents.getOrElse(index) { 1f }
+                    if (index == 0) topOfParent()
+                    else below(keyRows[index - 1])
+                    if (index == keyRows.size - 1) bottomOfParent()
+                    else above(keyRows[index + 1])
+                    centerHorizontally()
+                })
+            }
         }
 
         keyboardWaterRippleView?.setOccluders(
             keyRows.flatMap { row -> row.children.mapNotNull { it as? KeyView }.toList() }
         )
+        Log.i(
+            "FcitxColdStart",
+            "${javaClass.simpleName}.reloadLayout rows=${keyRows.size} " +
+                "duration=${SystemClock.elapsedRealtime() - startedAt}ms"
+        )
     }
+
+    fun updateAuxBarActions(actions: List<AuxBarAction>) {
+        val scrollable = actions.takeWhile { !it.isSeparator }
+        val pinned = actions.drop(scrollable.size + 1).filter { !it.isSeparator }
+        val cfg = auxBarConfig
+        if (cfg?.position == AuxBarPosition.AbovePreedit) {
+            auxBarListener?.invoke(scrollable, pinned)
+            return
+        }
+        if (cfg != null) {
+            auxBarListener?.invoke(emptyList(), emptyList())
+            applyAuxBarContent(scrollable, pinned)
+        }
+    }
+
+    private fun applyAuxBarContent(scrollable: List<AuxBarAction>, pinned: List<AuxBarAction>) {
+        val cfg = auxBarConfig ?: return
+        val customKeys = auxBarKeyDefs
+        val hasTabs = scrollable.isNotEmpty() || pinned.isNotEmpty()
+        val maxKeyCount = when (cfg.position) {
+            AuxBarPosition.Left, AuxBarPosition.Right -> keyRows.size
+            else -> Int.MAX_VALUE
+        }
+        val visibleCustomKeys = customKeys.take(maxKeyCount)
+        if (!hasTabs && visibleCustomKeys.isNotEmpty() && auxBarKeyAdapter != null) {
+            // No tabs: fill the aux bar with the user-configured custom keys.
+            // For left/right aux bar, clamp count to keyboard row count.
+            val rv = auxBarScrollableRv
+            if (rv?.adapter != auxBarKeyAdapter) {
+                rv?.adapter = auxBarKeyAdapter
+            }
+            auxBarKeyAdapter?.updateKeys(visibleCustomKeys)
+            auxBarPinnedAdapter?.updateActions(emptyList())
+        } else {
+            val rv = auxBarScrollableRv
+            if (rv?.adapter != auxBarScrollableAdapter) {
+                rv?.adapter = auxBarScrollableAdapter
+            }
+            auxBarScrollableAdapter?.updateActions(scrollable)
+            auxBarPinnedAdapter?.updateActions(pinned)
+        }
+    }
+
+    fun auxBarPosition(): AuxBarPosition? = auxBarConfig?.position
 
     private fun resolveRowHeightPercents(rows: List<List<KeyDef>>): List<Float> {
         if (rows.isEmpty()) return emptyList()
@@ -649,6 +909,21 @@ abstract class BaseKeyboard(
         invalidate()
     }
 
+    fun refreshIconTheme() {
+        if (!::keyRows.isInitialized) return
+        keyRows.forEach { row ->
+            row.children.forEach { child ->
+                (child as? KeyView)?.let { keyView ->
+                    when (keyView) {
+                        is ImageAltTextKeyView -> keyView.reapplyIconThemeOverride()
+                        is ImageTextKeyView -> keyView.reapplyIconThemeOverride()
+                        is ImageKeyView -> keyView.reapplyIconThemeOverride()
+                    }
+                }
+            }
+        }
+    }
+
     fun setHorizontalGapScale(scale: Float) {
         val target = scale.coerceIn(0.5f, 1f)
         if (kotlin.math.abs(horizontalGapScale - target) < 0.01f) return
@@ -695,10 +970,10 @@ abstract class BaseKeyboard(
         val activeAppearance = appearanceOverride ?: resolvedAppearance
         return when (activeAppearance) {
             is KeyDef.Appearance.AltText -> AltTextKeyView(context, theme, activeAppearance, horizontalGapScale)
-            is KeyDef.Appearance.ImageAltText -> ImageAltTextKeyView(context, theme, activeAppearance, horizontalGapScale)
-            is KeyDef.Appearance.ImageText -> ImageTextKeyView(context, theme, activeAppearance, horizontalGapScale)
+            is KeyDef.Appearance.ImageAltText -> ImageAltTextKeyView(context, theme, activeAppearance, horizontalGapScale, def.iconSlot)
+            is KeyDef.Appearance.ImageText -> ImageTextKeyView(context, theme, activeAppearance, horizontalGapScale, def.iconSlot)
             is KeyDef.Appearance.Text -> TextKeyView(context, theme, activeAppearance, horizontalGapScale)
-            is KeyDef.Appearance.Image -> ImageKeyView(context, theme, activeAppearance, horizontalGapScale)
+            is KeyDef.Appearance.Image -> ImageKeyView(context, theme, activeAppearance, horizontalGapScale, def.iconSlot)
         }.apply {
             setTextScale(currentTextScale)
             soundEffect = soundEffectFor(def, activeAppearance)
@@ -1291,18 +1566,21 @@ abstract class BaseKeyboard(
             }
             is ImageAltTextKeyView -> if (appearance is KeyDef.Appearance.ImageAltText) {
                 view.img.setImageResource(appearance.src)
+                view.reapplyIconThemeOverride()
                 view.altText.text = appearance.altText
                 view.refreshAltTextLayout()
             }
             is ImageTextKeyView -> if (appearance is KeyDef.Appearance.ImageText) {
                 view.mainText.text = appearance.displayText
                 view.img.setImageResource(appearance.src)
+                view.reapplyIconThemeOverride()
             }
             is TextKeyView -> if (appearance is KeyDef.Appearance.Text) {
                 view.mainText.text = appearance.displayText
             }
             is ImageKeyView -> if (appearance is KeyDef.Appearance.Image) {
                 view.img.setImageResource(appearance.src)
+                view.reapplyIconThemeOverride()
             }
         }
     }
@@ -1583,9 +1861,17 @@ abstract class BaseKeyboard(
     }
 
     override fun onInterceptTouchEvent(ev: MotionEvent): Boolean {
-        // intercept ACTION_DOWN and all following events will go to parent's onTouchEvent
-        return if (vivoKeypressWorkaround && ev.actionMasked == MotionEvent.ACTION_DOWN) true
-        else super.onInterceptTouchEvent(ev)
+        // Intercept only key presses for the workaround. Auxiliary bar RecyclerViews
+        // must receive their own touch stream for scrolling and clicks.
+        return if (
+            vivoKeypressWorkaround &&
+            ev.actionMasked == MotionEvent.ACTION_DOWN &&
+            findTargetChild(ev.x, ev.y) != null
+        ) {
+            true
+        } else {
+            super.onInterceptTouchEvent(ev)
+        }
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
@@ -2340,6 +2626,10 @@ abstract class BaseKeyboard(
         // do nothing by default
     }
 
+    open fun onReturnDrawableOverride(drawable: Drawable?) {
+        // do nothing by default - override in subclasses that render return key icons
+    }
+
     open fun onPunctuationUpdate(mapping: Map<String, String>) {
         // do nothing by default
     }
@@ -2352,4 +2642,317 @@ abstract class BaseKeyboard(
         // do nothing by default
     }
 
+}
+
+class AuxBarAdapter(
+    private val theme: Theme,
+    private val vMargin: Int,
+    private val hMargin: Int,
+    private val position: AuxBarPosition,
+    private val keyTextSize: Float,
+    private val onTrigger: (Int) -> Unit
+) : RecyclerView.Adapter<AuxBarAdapter.ViewHolder>() {
+
+    private var actions = listOf<AuxBarAction>()
+
+    private val keyBorder: Boolean by lazy { ThemeManager.prefs.keyBorder.getValue() }
+    private val keyBorderStroke: Boolean by lazy { ThemeManager.prefs.keyBorderStroke.getValue() }
+    private var radius: Float = 0f
+    private var minItemHeightPx: Int = -1
+
+    fun setMinItemHeight(px: Int) {
+        if (px > 0 && px != minItemHeightPx) {
+            minItemHeightPx = px
+            notifyDataSetChanged()
+        }
+    }
+
+    fun updateActions(newActions: List<AuxBarAction>) {
+        if (newActions == actions) return
+        actions = newActions
+        notifyDataSetChanged()
+    }
+
+    fun applyConfiguredFonts(rv: RecyclerView) {
+        for (i in 0 until rv.childCount) {
+            val holder = rv.getChildViewHolder(rv.getChildAt(i)) as? ViewHolder ?: continue
+            holder.label.setFontTypeFace("key_main_font")
+        }
+    }
+
+    override fun getItemCount() = actions.size
+
+    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
+        val ctx = parent.context
+        radius = ctx.dp(ThemeManager.prefs.keyRadius.getValue().toFloat())
+        val isHorizontal = position == AuxBarPosition.Top || position == AuxBarPosition.Bottom
+        val view = CustomGestureView(ctx).apply {
+            val extraHPad = if (isHorizontal) ctx.dp(12) else 0
+            setPadding(hMargin + extraHPad, vMargin, hMargin + extraHPad, vMargin)
+            layoutParams = ViewGroup.LayoutParams(
+                if (isHorizontal) ViewGroup.LayoutParams.WRAP_CONTENT else ViewGroup.LayoutParams.MATCH_PARENT,
+                if (isHorizontal) ViewGroup.LayoutParams.MATCH_PARENT else ViewGroup.LayoutParams.WRAP_CONTENT
+            )
+            val label = AutoScaleTextView(ctx).apply {
+                scaleMode = AutoScaleTextView.Mode.Proportional
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, FontProviders.getFontSize("key_main_font", keyTextSize))
+                typeface = Typeface.DEFAULT
+                fontKey = "key_main_font"
+                isSingleLine = true
+                gravity = gravityCenter
+                setTextColor(theme.keyTextColor)
+            }
+            val childLp = ViewGroup.LayoutParams(
+                if (isHorizontal) ViewGroup.LayoutParams.WRAP_CONTENT else ViewGroup.LayoutParams.MATCH_PARENT,
+                if (isHorizontal) ViewGroup.LayoutParams.MATCH_PARENT else
+                    if (minItemHeightPx > 0) minItemHeightPx else ctx.dp(52)
+            )
+            addView(label, childLp)
+            tag = label
+        }
+        applyThemeStyling(view)
+        return ViewHolder(view)
+    }
+
+    private fun applyThemeStyling(view: CustomGestureView) {
+        val ctx = view.context
+        val drawHMargin = hMargin
+        val drawVMargin = vMargin
+        val bkgColor = theme.keyBackgroundColor
+        val shadowColor = theme.keyShadowColor
+        if (keyBorder && keyBorderStroke) {
+            view.background = borderedKeyBackgroundDrawable(
+                bkgColor, shadowColor, radius, ctx.dp(1), drawHMargin, drawVMargin
+            )
+            view.foreground = StateListDrawable().apply {
+                addState(
+                    intArrayOf(android.R.attr.state_pressed),
+                    borderedKeyBackgroundDrawable(
+                        0, theme.keyPressHighlightColor,
+                        radius, ctx.dp(2), drawHMargin, drawVMargin
+                    )
+                )
+            }
+        } else if (keyBorder) {
+            view.background = shadowedKeyBackgroundDrawable(
+                bkgColor, shadowColor, radius, ctx.dp(1), drawHMargin, drawVMargin
+            )
+            view.foreground = StateListDrawable().apply {
+                addState(
+                    intArrayOf(android.R.attr.state_pressed),
+                    insetRadiusDrawable(drawHMargin, drawVMargin, radius, theme.keyPressHighlightColor)
+                )
+            }
+        } else {
+            // Match borderless key rendering in KeyView: no persistent key background,
+            // only pressed-state highlight over the keyboard/bar surface.
+            view.background = null
+            view.foreground = StateListDrawable().apply {
+                addState(
+                    intArrayOf(android.R.attr.state_pressed),
+                    InsetDrawable(ColorDrawable(theme.keyPressHighlightColor), drawHMargin, drawVMargin, drawHMargin, drawVMargin)
+                )
+            }
+        }
+    }
+
+    override fun onBindViewHolder(holder: ViewHolder, position: Int) {
+        val action = actions.getOrNull(position) ?: return
+        holder.bind(action, onTrigger)
+    }
+
+    class ViewHolder(val view: CustomGestureView) : RecyclerView.ViewHolder(view) {
+        internal val label: AutoScaleTextView get() = view.tag as AutoScaleTextView
+
+        fun bind(action: AuxBarAction, onTrigger: (Int) -> Unit) {
+            label.text = action.text
+            label.setFontTypeFace("key_main_font")
+            view.setOnClickListener { onTrigger(action.id) }
+        }
+    }
+}
+
+/**
+ * Adapter for the auxiliary bar that renders user-configured keys (used when the
+ * layout has an in-keyboard aux bar position but there are no tabs to display).
+ */
+class AuxBarKeyAdapter(
+    private val vertical: Boolean,
+    private val keyViewFactory: (KeyDef) -> KeyView
+) : RecyclerView.Adapter<AuxBarKeyAdapter.ViewHolder>() {
+
+    private var keys = listOf<KeyDef>()
+    private var keySignatures = listOf<String>()
+    private var minItemHeightPx: Int = -1
+    private var attachedRecyclerView: RecyclerView? = null
+    private var lastHorizontalWidth: Int = -1
+    private val horizontalLayoutChangeListener =
+        View.OnLayoutChangeListener { _, left, _, right, _, oldLeft, _, oldRight, _ ->
+            if (vertical) return@OnLayoutChangeListener
+            val width = right - left
+            val oldWidth = oldRight - oldLeft
+            if (width > 0 && width != oldWidth && width != lastHorizontalWidth) {
+                lastHorizontalWidth = width
+                notifyDataSetChanged()
+            }
+        }
+
+    fun setMinItemHeight(px: Int) {
+        if (px > 0 && px != minItemHeightPx) {
+            minItemHeightPx = px
+            notifyDataSetChanged()
+        }
+    }
+
+    fun updateKeys(newKeys: List<KeyDef>) {
+        val newSignatures = newKeys.map(::buildKeySignature)
+        if (newSignatures == keySignatures) return
+        keys = newKeys
+        keySignatures = newSignatures
+        notifyDataSetChanged()
+    }
+
+    override fun getItemCount() = keys.size
+
+    override fun getItemId(position: Int): Long {
+        val sig = keySignatures.getOrNull(position) ?: return RecyclerView.NO_ID
+        return sig.hashCode().toLong()
+    }
+
+    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ViewHolder {
+        val ctx = parent.context
+        val view = FrameLayout(ctx).apply {
+            layoutParams = RecyclerView.LayoutParams(
+                if (!vertical) ViewGroup.LayoutParams.WRAP_CONTENT else ViewGroup.LayoutParams.MATCH_PARENT,
+                if (!vertical) ViewGroup.LayoutParams.MATCH_PARENT else ViewGroup.LayoutParams.WRAP_CONTENT
+            )
+            if (vertical) {
+                minimumHeight = if (minItemHeightPx > 0) minItemHeightPx else ctx.dp(52)
+            }
+        }
+        return ViewHolder(view)
+    }
+
+    override fun onBindViewHolder(holder: ViewHolder, position: Int) {
+        val key = keys.getOrNull(position) ?: return
+        val signature = keySignatures.getOrNull(position) ?: buildKeySignature(key)
+        if (!vertical) {
+            val rv = attachedRecyclerView ?: (holder.itemView.parent as? RecyclerView)
+            val usableWidth = rv?.let { (it.width - it.paddingLeft - it.paddingRight).coerceAtLeast(0) } ?: 0
+            if (usableWidth > 0 && itemCount > 0) {
+                val lp = holder.itemView.layoutParams as? RecyclerView.LayoutParams
+                    ?: RecyclerView.LayoutParams(
+                        ViewGroup.LayoutParams.WRAP_CONTENT,
+                        ViewGroup.LayoutParams.MATCH_PARENT
+                    )
+                lp.width = usableWidth / itemCount
+                lp.height = ViewGroup.LayoutParams.MATCH_PARENT
+                lp.rightMargin = 0
+                holder.itemView.layoutParams = lp
+            }
+        }
+        holder.bind(key, signature)
+    }
+
+    override fun onAttachedToRecyclerView(recyclerView: RecyclerView) {
+        super.onAttachedToRecyclerView(recyclerView)
+        attachedRecyclerView = recyclerView
+        if (!vertical) {
+            recyclerView.addOnLayoutChangeListener(horizontalLayoutChangeListener)
+            lastHorizontalWidth = recyclerView.width
+        }
+    }
+
+    override fun onDetachedFromRecyclerView(recyclerView: RecyclerView) {
+        if (!vertical) {
+            recyclerView.removeOnLayoutChangeListener(horizontalLayoutChangeListener)
+            lastHorizontalWidth = -1
+        }
+        if (attachedRecyclerView === recyclerView) {
+            attachedRecyclerView = null
+        }
+        super.onDetachedFromRecyclerView(recyclerView)
+    }
+
+    inner class ViewHolder(private val container: FrameLayout) : RecyclerView.ViewHolder(container) {
+        private var boundSignature: String? = null
+        private var keyView: KeyView? = null
+
+        fun bind(key: KeyDef, signature: String) {
+            var current = keyView
+            if (current == null || boundSignature != signature) {
+                container.removeAllViews()
+                current = keyViewFactory(key).also { created ->
+                    created.setOnTouchListener { v, event ->
+                        when (event.actionMasked) {
+                            MotionEvent.ACTION_DOWN, MotionEvent.ACTION_MOVE -> {
+                                v.parent?.requestDisallowInterceptTouchEvent(true)
+                            }
+                            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                                v.parent?.requestDisallowInterceptTouchEvent(false)
+                            }
+                        }
+                        false
+                    }
+                    container.addView(
+                        created,
+                        ViewGroup.LayoutParams(
+                            if (!vertical) ViewGroup.LayoutParams.WRAP_CONTENT else ViewGroup.LayoutParams.MATCH_PARENT,
+                            if (!vertical) ViewGroup.LayoutParams.MATCH_PARENT else
+                                if (minItemHeightPx > 0) minItemHeightPx else container.context.dp(52)
+                        )
+                    )
+                }
+                keyView = current
+                boundSignature = signature
+            }
+            if (vertical) {
+                current.layoutParams = (current.layoutParams ?: ViewGroup.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                )).apply {
+                    height = if (minItemHeightPx > 0) minItemHeightPx else container.context.dp(52)
+                }
+            } else {
+                current.layoutParams = (current.layoutParams ?: ViewGroup.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT
+                )).apply {
+                    width = ViewGroup.LayoutParams.MATCH_PARENT
+                    height = ViewGroup.LayoutParams.MATCH_PARENT
+                }
+            }
+        }
+    }
+
+    private fun buildKeySignature(key: KeyDef): String {
+        val app = key.appearance
+        val popupSig = key.popup?.joinToString("|") { it::class.java.name }.orEmpty()
+        val behaviorSig = key.behaviors
+            .sortedBy { it::class.java.name + it.hashCode() }
+            .joinToString("|") { it::class.java.name + ":" + it.hashCode() }
+        return buildString(128) {
+            append(key::class.java.name)
+            append('#').append(app::class.java.name)
+            append('#').append(app.variant.name)
+            append('#').append(app.border.name)
+            append('#').append(app.margin)
+            append('#').append(app.percentWidth)
+            append('#').append(app.viewId)
+            append('#').append(app.textColor)
+            append('#').append(app.textColorMonet)
+            append('#').append(app.altTextColor)
+            append('#').append(app.altTextColorMonet)
+            append('#').append(app.backgroundColor)
+            append('#').append(app.backgroundColorMonet)
+            append('#').append(app.shadowColor)
+            append('#').append(app.shadowColorMonet)
+            append('#').append(behaviorSig)
+            append('#').append(popupSig)
+        }
+    }
+
+    init {
+        setHasStableIds(true)
+    }
 }

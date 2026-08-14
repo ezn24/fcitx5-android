@@ -16,6 +16,7 @@
     <string name="confirm_discard_changes">Discard your unsaved edits?</string>
     <string name="discard_changes">Discard</string>
     <string name="save">Save</string>
+    <string name="save_as">Save As…</string>
     <string name="undo">Undo</string>
     <string name="redo">Redo</string>
 
@@ -34,6 +35,8 @@
     <string name="replace_all_button">All</string>
     <string name="find_prev">Previous match</string>
     <string name="find_next">Next match</string>
+    <string name="search_regex">Regular expression</string>
+    <string name="search_case_sensitive">Case sensitive</string>
     <string name="search_close">Close search</string>
     <string name="no_matches">No matches</string>
     <string name="word_wrap">Word wrap</string>
@@ -71,4 +74,7 @@
     <string name="open_single_file">Open single file…</string>
     <string name="low_memory_features_disabled">Low memory: some features were disabled (syntax highlight, diagnostics, auto-completion).</string>
     <string name="editor_runtime_recovered">An editor error occurred. Some features were disabled to keep the app responsive.</string>
+    <string name="open_file">Open</string>
+    <string name="open_file_saf">Open (SAF)</string>
+    <string name="close_tab">Close tab</string>
 </resources>

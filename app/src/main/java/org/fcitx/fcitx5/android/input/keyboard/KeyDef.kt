@@ -11,7 +11,13 @@ import org.fcitx.fcitx5.android.data.InputFeedbacks
 open class KeyDef(
     val appearance: Appearance,
     val behaviors: Set<Behavior>,
-    val popup: Array<Popup>? = null
+    val popup: Array<Popup>? = null,
+    /**
+     * Icon theme slot name for this key's icon override.
+     * When non-null and the active IconTheme provides a value,
+     * it replaces the built-in drawable resource.
+     */
+    val iconSlot: String? = null
 ) {
     /**
      * Optional per-row height percentage hint contributed by this key.
@@ -286,7 +292,12 @@ open class KeyDef(
         }
 
         class Menu(val items: Array<Item>) : Popup() {
-            class Item(val label: String, @DrawableRes val icon: Int, val action: KeyAction)
+            class Item(
+                val label: String,
+                @DrawableRes val icon: Int,
+                val action: KeyAction,
+                val iconSlot: String? = null
+            )
         }
 
         /**

@@ -7,6 +7,7 @@ package org.fcitx.fcitx5.android.input.candidates.expanded
 import android.annotation.SuppressLint
 import android.content.Context
 import android.content.res.Configuration
+import android.graphics.drawable.Drawable
 import android.view.Gravity
 import androidx.constraintlayout.widget.ConstraintLayout
 import org.fcitx.fcitx5.android.R
@@ -33,6 +34,7 @@ import splitties.views.dsl.constraintlayout.rightOfParent
 import splitties.views.dsl.constraintlayout.rightToLeftOf
 import splitties.views.dsl.constraintlayout.topOfParent
 import splitties.views.dsl.core.add
+import splitties.views.dsl.core.matchParent
 import splitties.views.dsl.core.wrapContent
 import splitties.views.dsl.recyclerview.recyclerView
 import splitties.views.imageResource
@@ -40,7 +42,7 @@ import splitties.views.imageResource
 @SuppressLint("ViewConstructor")
 class ExpandedCandidateLayout(context: Context, theme: Theme) : ConstraintLayout(context) {
 
-    class Keyboard(context: Context, theme: Theme) : BaseKeyboard(context, theme, ::Layout) {
+    class Keyboard(context: Context, theme: Theme) : BaseKeyboard(context, theme, ::Layout, { null }) {
         companion object {
             const val UpBtnLabel = "U"
             const val DownBtnLabel = "D"
@@ -55,7 +57,8 @@ class ExpandedCandidateLayout(context: Context, theme: Theme) : ConstraintLayout
                         to = UpBtnLabel,
                         percentWidth = 1f,
                         variant = KeyDef.Appearance.Variant.Alternative,
-                        viewId = UpBtnId
+                        viewId = UpBtnId,
+                        iconSlot = "keys.pageup"
                     )
                 ),
                 listOf(
@@ -64,7 +67,8 @@ class ExpandedCandidateLayout(context: Context, theme: Theme) : ConstraintLayout
                         to = DownBtnLabel,
                         percentWidth = 1f,
                         variant = KeyDef.Appearance.Variant.Alternative,
-                        viewId = DownBtnId
+                        viewId = DownBtnId,
+                        iconSlot = "keys.pagedown"
                     )
                 ),
                 listOf(BackspaceKey(percentWidth = 1f, KeyDef.Appearance.Variant.Alternative)),
@@ -79,6 +83,12 @@ class ExpandedCandidateLayout(context: Context, theme: Theme) : ConstraintLayout
 
         override fun onReturnDrawableUpdate(returnDrawable: Int) {
             `return`?.img?.imageResource = returnDrawable
+        }
+
+        override fun onReturnDrawableOverride(drawable: Drawable?) {
+            if (drawable != null) {
+                `return`?.img?.setImageDrawable(drawable)
+            }
         }
     }
 
@@ -138,12 +148,12 @@ class ExpandedCandidateLayout(context: Context, theme: Theme) : ConstraintLayout
             bottomOfParent()
         })
         tabsContainer.apply {
-            add(scrollableTabs, lParams {
+            add(scrollableTabs, lParams(matchParent, 0) {
                 topOfParent()
                 centerHorizontally()
                 above(pinnedTabs)
             })
-            add(pinnedTabs, lParams(height = wrapContent) {
+            add(pinnedTabs, lParams(matchParent, wrapContent) {
                 bottomOfParent()
                 centerHorizontally()
             })

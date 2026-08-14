@@ -6,6 +6,7 @@ package org.fcitx.fcitx5.android.input.keyboard
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.graphics.drawable.Drawable
 import org.fcitx.fcitx5.android.R
 import org.fcitx.fcitx5.android.data.theme.Theme
 import org.fcitx.fcitx5.android.input.picker.PickerWindow
@@ -16,7 +17,7 @@ import splitties.views.imageResource
 class NumberKeyboard(
     context: Context,
     theme: Theme,
-) : BaseKeyboard(context, theme, ::Layout) {
+) : BaseKeyboard(context, theme, ::Layout, { null }) {
 
     companion object {
         const val Name = "Number"
@@ -61,6 +62,12 @@ class NumberKeyboard(
 
     override fun onReturnDrawableUpdate(returnDrawable: Int) {
         `return`?.img?.imageResource = returnDrawable
+    }
+
+    override fun onReturnDrawableOverride(drawable: Drawable?) {
+        if (drawable != null) {
+            `return`?.img?.setImageDrawable(drawable)
+        }
     }
 
     @SuppressLint("MissingSuperCall")

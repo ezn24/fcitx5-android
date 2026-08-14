@@ -195,7 +195,8 @@ class CapsKey(
         add(Behavior.LongPress(KeyAction.CapsAction(true)))
         add(Behavior.DoubleTap(KeyAction.CapsAction(true)))
         swipe?.let { add(Behavior.Swipe(it)) }
-    }
+    },
+    iconSlot = "keys.capslock.none"
 )
 
 class LayoutSwitchKey(
@@ -260,12 +261,14 @@ class LayoutSwitchKey(
             Popup.Menu.Item(
                 "Symbols",
                 R.drawable.ic_baseline_emoji_symbols_24,
-                KeyAction.LayoutSwitchAction(PickerWindow.Key.Symbol.name)
+                KeyAction.LayoutSwitchAction(PickerWindow.Key.Symbol.name),
+                iconSlot = "keys.symbols"
             ),
             Popup.Menu.Item(
                 "NumPad",
                 R.drawable.ic_number_pad,
-                KeyAction.LayoutSwitchAction(NumberKeyboard.Name)
+                KeyAction.LayoutSwitchAction(NumberKeyboard.Name),
+                iconSlot = "keys.numpad"
             )
         )
        )
@@ -317,7 +320,8 @@ class BackspaceKey(
     setOf(
         Behavior.Press(KeyAction.SymAction(KeySym(FcitxKeyMapping.FcitxKey_BackSpace))),
         Behavior.Repeat(KeyAction.SymAction(KeySym(FcitxKeyMapping.FcitxKey_BackSpace)))
-    )
+    ),
+    iconSlot = "keys.backspace"
 )
 
 class QuickPhraseKey : KeyDef(
@@ -329,7 +333,8 @@ class QuickPhraseKey : KeyDef(
     setOf(
         Behavior.Press(KeyAction.QuickPhraseAction),
         Behavior.LongPress(KeyAction.UnicodeAction)
-    )
+    ),
+    iconSlot = "keys.quickphrase"
 )
 
 class CommaKey(
@@ -365,21 +370,25 @@ class CommaKey(
                 Popup.Menu.Item(
                     "Emoji",
                     R.drawable.ic_baseline_tag_faces_24,
-                    KeyAction.PickerSwitchAction()
+                    KeyAction.PickerSwitchAction(),
+                    iconSlot = "keys.emoji"
                 ),
                 Popup.Menu.Item(
                     "QuickPhrase",
                     R.drawable.ic_baseline_format_quote_24,
-                    KeyAction.QuickPhraseAction
+                    KeyAction.QuickPhraseAction,
+                    iconSlot = "keys.quickphrase"
                 ),
                 Popup.Menu.Item(
                     "Unicode",
                     R.drawable.ic_logo_unicode,
-                    KeyAction.UnicodeAction
+                    KeyAction.UnicodeAction,
+                    iconSlot = "keys.unicode"
                 )
             )
         )
-    )
+    ),
+    iconSlot = "keys.emoji"
 )
 
 class LanguageKey(
@@ -406,7 +415,8 @@ class LanguageKey(
     setOf(
         Behavior.Press(KeyAction.LangSwitchAction),
         Behavior.LongPress(KeyAction.ShowInputMethodPickerAction)
-    )
+    ),
+    iconSlot = "keys.language"
 )
 
 class SpaceKey(
@@ -489,11 +499,13 @@ class ReturnKey(
         Popup.Menu(
             arrayOf(
                 Popup.Menu.Item(
-                    "Emoji", R.drawable.ic_baseline_tag_faces_24, KeyAction.PickerSwitchAction()
+                    "Emoji", R.drawable.ic_baseline_tag_faces_24, KeyAction.PickerSwitchAction(),
+                    iconSlot = "keys.emoji"
                 )
             )
         )
     ),
+    iconSlot = "keys.return.default"
 )
 
 class ImageLayoutSwitchKey(
@@ -502,7 +514,8 @@ class ImageLayoutSwitchKey(
     to: String,
     percentWidth: Float = 0.1f,
     variant: Variant = Variant.AltForeground,
-    viewId: Int = -1
+    viewId: Int = -1,
+    iconSlot: String? = null
 ) : KeyDef(
     Appearance.Image(
         src = icon,
@@ -513,7 +526,8 @@ class ImageLayoutSwitchKey(
     ),
     setOf(
         Behavior.Press(KeyAction.LayoutSwitchAction(to))
-    )
+    ),
+    iconSlot = iconSlot
 )
 
 class ImagePickerSwitchKey(
@@ -522,7 +536,8 @@ class ImagePickerSwitchKey(
     to: PickerWindow.Key,
     percentWidth: Float = 0.1f,
     variant: Variant = Variant.AltForeground,
-    viewId: Int = -1
+    viewId: Int = -1,
+    iconSlot: String? = null
 ) : KeyDef(
     Appearance.Image(
         src = icon,
@@ -533,7 +548,8 @@ class ImagePickerSwitchKey(
     ),
     setOf(
         Behavior.Press(KeyAction.PickerSwitchAction(to))
-    )
+    ),
+    iconSlot = iconSlot
 )
 
 class TextPickerSwitchKey(
@@ -566,7 +582,8 @@ class MiniSpaceKey : KeyDef(
     ),
     setOf(
         Behavior.Press(KeyAction.SymAction(KeySym(FcitxKeyMapping.FcitxKey_space)))
-    )
+    ),
+    iconSlot = "keys.space"
 )
 
 class NumPadKey(

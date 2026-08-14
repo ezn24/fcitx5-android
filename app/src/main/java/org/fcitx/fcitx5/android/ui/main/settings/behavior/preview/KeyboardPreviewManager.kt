@@ -17,12 +17,15 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import org.fcitx.fcitx5.android.R
+import org.fcitx.fcitx5.android.core.AuxBarAction
 import org.fcitx.fcitx5.android.daemon.FcitxConnection
 import org.fcitx.fcitx5.android.data.prefs.AppPrefs
 import org.fcitx.fcitx5.android.data.theme.ThemeManager
 import org.fcitx.fcitx5.android.input.config.ConfigProvider
 import org.fcitx.fcitx5.android.input.config.ConfigProviders
+import org.fcitx.fcitx5.android.input.keyboard.AuxBarConfig
 import org.fcitx.fcitx5.android.input.keyboard.TextKeyboard
 import org.fcitx.fcitx5.android.ui.main.settings.preview.PreviewInputMethodEntry
 import org.fcitx.fcitx5.android.ui.main.settings.behavior.utils.LayoutJsonUtils
@@ -52,7 +55,10 @@ class KeyboardPreviewManager(
     private val context: Context,
     private val previewContainer: ViewGroup,
     private val entries: Map<String, List<List<Map<String, Any?>>>>,
-    private val layoutHeightPercentOverrideProvider: (String) -> Int? = { null }
+    private val layoutHeightPercentOverrideProvider: (String) -> Int? = { null },
+    private val layoutAuxBarConfigProvider: (String) -> AuxBarConfig? = { null },
+    private val layoutAuxBarKeysProvider: (String) -> List<Map<String, Any?>> = { emptyList() },
+    private val subModeNameToIdProvider: () -> Map<String, String> = { emptyMap() }
 ) {
     private var previewKeyboard: TextKeyboard? = null
     private val previewBlurMask by lazy { PreviewKeyBlurMaskView(context) }
@@ -72,8 +78,8 @@ class KeyboardPreviewManager(
         previewContainer.removeAllViews()
 
         // Try to load submode-specific layout first
-        val subModeKey = previewSubModeLabel?.let { "$layoutName:$it" }
-        val effectiveLayoutKey = subModeKey?.takeIf { entries.containsKey(it) } ?: layoutName
+        val effectiveSubModeKey = resolveEffectiveSubModeKey(layoutName, previewSubModeLabel)
+        val effectiveLayoutKey = effectiveSubModeKey ?: layoutName
         val rows = entries[effectiveLayoutKey] ?: return
 
         val theme = ThemeManager.activeTheme
@@ -88,7 +94,7 @@ class KeyboardPreviewManager(
         }
 
         // Build submode map with all available submodes for this layout
-        val subModeMap = buildSubModeMap(layoutName, subModeKey, rows, previewSubModeLabel)
+        val subModeMap = buildSubModeMap(layoutName, effectiveSubModeKey, rows, previewSubModeLabel)
 
         val tempJson = JsonObject(mapOf(layoutName to JsonObject(subModeMap)))
 
@@ -105,7 +111,7 @@ class KeyboardPreviewManager(
         var appliedPreviewIme: org.fcitx.fcitx5.android.core.InputMethodEntry? = null
 
         try {
-            appliedPreviewIme = createKeyboardPreview(layoutName, previewSubModeLabel, fcitxConnection)
+            appliedPreviewIme = createKeyboardPreview(layoutName, previewSubModeLabel, effectiveSubModeKey, fcitxConnection)
         } catch (e: Exception) {
             android.util.Log.e("KeyboardPreview", "Failed to create keyboard preview for layout: $layoutName, submode: $previewSubModeLabel", e)
             showError(e.message ?: "Unknown error")
@@ -139,9 +145,53 @@ class KeyboardPreviewManager(
             })
         })
 
+        val effectiveKey = subModeKey ?: layoutName
+        val auxBarConfig = if (layoutAuxBarConfigProvider(effectiveKey)?.position == org.fcitx.fcitx5.android.input.keyboard.AuxBarPosition.AbovePreedit) null
+            else layoutAuxBarConfigProvider(effectiveKey)
+        val auxBarKeys = layoutAuxBarKeysProvider(effectiveKey)
+        val meta = if (auxBarConfig != null) {
+            val posStr = when (auxBarConfig.position) {
+                org.fcitx.fcitx5.android.input.keyboard.AuxBarPosition.Top -> "top"
+                org.fcitx.fcitx5.android.input.keyboard.AuxBarPosition.Bottom -> "bottom"
+                org.fcitx.fcitx5.android.input.keyboard.AuxBarPosition.Left -> "left"
+                org.fcitx.fcitx5.android.input.keyboard.AuxBarPosition.Right -> "right"
+                org.fcitx.fcitx5.android.input.keyboard.AuxBarPosition.AbovePreedit -> "top"
+            }
+            val auxBarObj = JsonObject(
+                mutableMapOf<String, JsonElement>(
+                    "position" to JsonPrimitive(posStr),
+                    "size_percent" to JsonPrimitive(auxBarConfig.sizePercent)
+                ).apply {
+                    if (auxBarKeys.isNotEmpty()) {
+                        this["keys"] = JsonArray(auxBarKeys.map { keyMap ->
+                            JsonObject(keyMap.entries.associate { (k, v) ->
+                                k to LayoutJsonUtils.convertToJsonProperty(v)
+                            })
+                        })
+                    }
+                }
+            )
+            JsonObject(mapOf("aux_bar" to auxBarObj))
+        } else if (auxBarKeys.isNotEmpty()) {
+            JsonObject(mapOf(
+                "aux_bar" to JsonObject(mapOf(
+                    "keys" to JsonArray(auxBarKeys.map { keyMap ->
+                        JsonObject(keyMap.entries.associate { (k, v) ->
+                            k to LayoutJsonUtils.convertToJsonProperty(v)
+                        })
+                    })
+                ))
+            ))
+        } else null
+
         if (subModeKey != null && entries.containsKey(subModeKey)) {
             // Editing a submode layout - add it with its label
-            subModeMap[previewSubModeLabel ?: "default"] = currentRowsArray
+            val subModeEntry: JsonElement = if (meta != null) {
+                JsonObject(mapOf("__meta__" to meta, "default" to currentRowsArray))
+            } else {
+                currentRowsArray
+            }
+            subModeMap[previewSubModeLabel ?: "default"] = subModeEntry
             // Also add default layout if it exists (for fallback)
             val defaultRows = entries[layoutName]
             if (defaultRows != null) {
@@ -156,7 +206,11 @@ class KeyboardPreviewManager(
             }
         } else {
             // Editing default layout
-            subModeMap["default"] = currentRowsArray
+            subModeMap["default"] = if (meta != null) {
+                JsonObject(mapOf("__meta__" to meta, "default" to currentRowsArray))
+            } else {
+                currentRowsArray
+            }
         }
 
         return subModeMap
@@ -168,6 +222,7 @@ class KeyboardPreviewManager(
     private fun createKeyboardPreview(
         layoutName: String,
         previewSubModeLabel: String?,
+        effectiveSubModeKey: String?,
         fcitxConnection: FcitxConnection
     ): org.fcitx.fcitx5.android.core.InputMethodEntry {
         val theme = ThemeManager.activeTheme
@@ -176,8 +231,7 @@ class KeyboardPreviewManager(
             val displayMetrics = context.resources.displayMetrics
             val screenHeight = displayMetrics.heightPixels
 
-            val subModeKey = previewSubModeLabel?.let { "$layoutName:$it" }
-            val effectiveLayoutKey = subModeKey?.takeIf { entries.containsKey(it) } ?: layoutName
+            val effectiveLayoutKey = effectiveSubModeKey ?: layoutName
             val rows = entries[effectiveLayoutKey].orEmpty()
 
             // Get keyboard height percentage from layout override or preferences
@@ -229,6 +283,7 @@ class KeyboardPreviewManager(
             onInputMethodUpdate(previewIme)
             setTextScale(1.0f)
             refreshStyle()
+            updateAuxBarActions(emptyList<AuxBarAction>())
             previewBlurMask.applyTheme(theme, ThemeManager.prefs.keyBorder.getValue())
             previewBlurMask.bindKeyboard(this)
             post { previewBlurMask.refreshMask(hierarchyChanged = true) }
@@ -264,6 +319,18 @@ class KeyboardPreviewManager(
         if (sum <= 0f) return 1f
         val normalized = distributed.map { it * 100f / sum }
         return (normalized.sum() / 100f).coerceAtLeast(0.1f)
+    }
+
+    private fun resolveEffectiveSubModeKey(
+        layoutName: String,
+        previewSubModeLabel: String?
+    ): String? {
+        val label = previewSubModeLabel?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+        val keyByLabel = "$layoutName:$label"
+        if (entries.containsKey(keyByLabel)) return keyByLabel
+        val keyById = subModeNameToIdProvider()[label]?.let { "$layoutName:$it" }
+        if (keyById != null && entries.containsKey(keyById)) return keyById
+        return null
     }
 
     /**

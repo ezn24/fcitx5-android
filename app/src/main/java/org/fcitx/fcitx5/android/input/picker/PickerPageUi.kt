@@ -117,7 +117,7 @@ class PickerPageUi(
             keyActionListener?.onKeyAction(backspaceAction, Source.Keyboard)
         }
         val listener = View.OnClickListener { action.invoke(it) }
-        ImageKeyView(ctx, theme, backspaceAppearance).apply {
+        ImageKeyView(ctx, theme, backspaceAppearance, iconSlot = "keys.backspace").apply {
             setOnClickListener(listener)
             repeatEnabled = true
             onRepeatListener = action
@@ -208,6 +208,12 @@ class PickerPageUi(
         keyViews.forEach { keyView ->
             keyView.mainText.setTextSize(TypedValue.COMPLEX_UNIT_SP, textSize)
             keyView.mainText.setFontTypeFace("key_main_font")
+        }
+    }
+
+    fun refreshIconTheme() {
+        if (density.showBackspace) {
+            backspaceKey.reapplyIconThemeOverride()
         }
     }
 

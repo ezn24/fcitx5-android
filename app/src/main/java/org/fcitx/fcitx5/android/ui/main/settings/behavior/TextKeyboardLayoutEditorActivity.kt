@@ -57,6 +57,8 @@ import org.fcitx.fcitx5.android.data.theme.ThemeManager
 import org.fcitx.fcitx5.android.input.config.ConfigProviders
 import org.fcitx.fcitx5.android.input.config.ConfigProvider
 import org.fcitx.fcitx5.android.input.config.UserConfigFiles
+import org.fcitx.fcitx5.android.input.keyboard.AuxBarPosition
+import org.fcitx.fcitx5.android.input.keyboard.AuxBarConfig
 import org.fcitx.fcitx5.android.input.keyboard.TextKeyboard
 import org.fcitx.fcitx5.android.ui.main.settings.behavior.adapter.KeyboardLayoutAdapter
 import org.fcitx.fcitx5.android.utils.AppUtil
@@ -123,6 +125,10 @@ class TextKeyboardLayoutEditorActivity : AppCompatActivity() {
             }
         }
     }
+
+    private var auxBarDialogKeysAdapter: AuxBarKeysAdapter? = null
+    private var auxBarDialogKeysRv: RecyclerView? = null
+    private var auxBarDialogKeysEmptyHint: TextView? = null
 
     private val spinnerContainer by lazy {
         LinearLayout(this).apply {
@@ -200,11 +206,25 @@ class TextKeyboardLayoutEditorActivity : AppCompatActivity() {
         toolbar.subtitle = currentEditingSubtitle()
     }
 
+    private fun resolvePreviewLabel(): String? =
+        previewSubModeLabel?.takeIf { it.isNotBlank() }
+
+    private fun resolveExistingSubModeKey(layoutName: String): String? {
+        val subModeLabel = previewSubModeLabel?.takeIf { it.isNotBlank() } ?: return null
+        val subModeKey = "$layoutName:$subModeLabel"
+        if (entries.containsKey(subModeKey)) return subModeKey
+        val idKey = subModeManager.nameToIdMap[subModeLabel]?.let { "$layoutName:$it" }
+        if (idKey != null && entries.containsKey(idKey)) return idKey
+        return null
+    }
+
     private fun currentEditingSubtitle(): String? {
         val layoutName = currentLayout?.takeIf { it.isNotBlank() } ?: return null
         val subModeLabel = previewSubModeLabel?.takeIf { it.isNotBlank() }
         val subModeKey = subModeLabel?.let { "$layoutName:$it" }
-        val hasDedicatedSubModeLayout = subModeKey != null && entries.containsKey(subModeKey)
+        val hasDedicatedSubModeLayout = subModeKey != null &&
+            (entries.containsKey(subModeKey) ||
+                subModeManager.nameToIdMap[subModeLabel]?.let { entries.containsKey("$layoutName:$it") } == true)
         val editing = if (hasDedicatedSubModeLayout) {
             "$layoutName:$subModeLabel"
         } else {
@@ -229,20 +249,32 @@ class TextKeyboardLayoutEditorActivity : AppCompatActivity() {
         KeyboardPreviewManager(
             this,
             previewKeyboardContainer,
-            dataManager.entries
-        ) { layoutKey ->
-            val landscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
-            val baseKey = LayoutJsonUtils.baseLayoutNameFromEntryKey(layoutKey)
-            if (landscape) {
-                dataManager.getLayoutHeightPercentOverrideLandscape(layoutKey)
-                    ?: dataManager.getLayoutHeightPercentOverrideLandscape(baseKey)
-                    ?: dataManager.getLayoutHeightPercentOverride(layoutKey)
-                    ?: dataManager.getLayoutHeightPercentOverride(baseKey)
-            } else {
-                dataManager.getLayoutHeightPercentOverride(layoutKey)
-                    ?: dataManager.getLayoutHeightPercentOverride(baseKey)
+            dataManager.entries,
+            layoutHeightPercentOverrideProvider = { layoutKey ->
+                val landscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+                val baseKey = LayoutJsonUtils.baseLayoutNameFromEntryKey(layoutKey)
+                if (landscape) {
+                    dataManager.getLayoutHeightPercentOverrideLandscape(layoutKey)
+                        ?: dataManager.getLayoutHeightPercentOverrideLandscape(baseKey)
+                        ?: dataManager.getLayoutHeightPercentOverride(layoutKey)
+                        ?: dataManager.getLayoutHeightPercentOverride(baseKey)
+                } else {
+                    dataManager.getLayoutHeightPercentOverride(layoutKey)
+                        ?: dataManager.getLayoutHeightPercentOverride(baseKey)
+                }
+            },
+            layoutAuxBarConfigProvider = { layoutKey ->
+                dataManager.getLayoutAuxBarConfig(layoutKey)
+            },
+            layoutAuxBarKeysProvider = { layoutKey ->
+                val baseKey = LayoutJsonUtils.baseLayoutNameFromEntryKey(layoutKey)
+                dataManager.getLayoutAuxBarKeys(layoutKey)
+                    .ifEmpty { dataManager.getLayoutAuxBarKeys(baseKey) }
+            },
+            subModeNameToIdProvider = {
+                subModeManager.nameToIdMap
             }
-        }
+        )
     }
     
     private val keyEditorLauncher: ActivityResultLauncher<Intent> =
@@ -257,12 +289,12 @@ class TextKeyboardLayoutEditorActivity : AppCompatActivity() {
                 ?.takeIf { it >= 0 }
 
             val layoutName = currentLayout ?: return@registerForActivityResult
+            val id = previewSubModeLabel?.let { subModeManager.nameToIdMap[it] }
             val subModeKey = previewSubModeLabel?.let { "$layoutName:$it" }
-            val rows = if (subModeKey != null && entries.containsKey(subModeKey)) {
-                entries[subModeKey]
-            } else {
-                entries[layoutName]
-            } ?: return@registerForActivityResult
+            val idKey = id?.let { "$layoutName:$it" }
+            val actualSubModeKey = listOfNotNull(subModeKey, idKey).firstOrNull { entries.containsKey(it) }
+            val key = actualSubModeKey ?: layoutName
+            val rows = entries[key] ?: return@registerForActivityResult
 
             when (action) {
                 KeyEditorActivity.RESULT_ACTION_SAVE -> {
@@ -284,7 +316,7 @@ class TextKeyboardLayoutEditorActivity : AppCompatActivity() {
                     }
 
                     currentLayout?.let { name ->
-                        previewManager.updatePreview(name, previewSubModeLabel, fcitxConnection)
+                        previewManager.updatePreview(name, resolvePreviewLabel(), fcitxConnection)
                         updateSaveButtonState()
                     }
                 }
@@ -294,7 +326,51 @@ class TextKeyboardLayoutEditorActivity : AppCompatActivity() {
                         rows[rowIndex].removeAt(keyIndex)
                         rowsAdapter?.notifyRowChanged(rowIndex)
                         currentLayout?.let { name ->
-                            previewManager.updatePreview(name, previewSubModeLabel, fcitxConnection)
+                            previewManager.updatePreview(name, resolvePreviewLabel(), fcitxConnection)
+                            updateSaveButtonState()
+                        }
+                    }
+                }
+            }
+        }
+
+    private val auxBarKeyEditorLauncher: ActivityResultLauncher<Intent> =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            val data = result.data ?: return@registerForActivityResult
+            if (result.resultCode != RESULT_OK) return@registerForActivityResult
+
+            val action = data.getStringExtra(KeyEditorActivity.EXTRA_RESULT_ACTION) ?: return@registerForActivityResult
+            val keyIndex = data.takeIf { it.hasExtra(KeyEditorActivity.EXTRA_KEY_INDEX) }
+                ?.getIntExtra(KeyEditorActivity.EXTRA_KEY_INDEX, -1)
+                ?.takeIf { it >= 0 }
+
+            val layoutName = currentLayout ?: return@registerForActivityResult
+            val editingKey = currentEditingLayoutKey() ?: return@registerForActivityResult
+            val keys = dataManager.getLayoutAuxBarKeysRef(editingKey)
+
+            when (action) {
+                KeyEditorActivity.RESULT_ACTION_SAVE -> {
+                    val resultKeyData = data.serializable<HashMap<String, Any?>>(KeyEditorActivity.EXTRA_RESULT_KEY_DATA)
+                        ?.toMutableMap() ?: return@registerForActivityResult
+
+                    if (keyIndex != null && keyIndex in keys.indices) {
+                        keys[keyIndex] = resultKeyData
+                    } else {
+                        keys.add(resultKeyData)
+                    }
+                    refreshAuxBarKeysInDialog()
+                    currentLayout?.let { name ->
+                        previewManager.updatePreview(name, resolvePreviewLabel(), fcitxConnection)
+                        updateSaveButtonState()
+                    }
+                }
+
+                KeyEditorActivity.RESULT_ACTION_DELETE -> {
+                    if (keyIndex != null && keyIndex in keys.indices) {
+                        keys.removeAt(keyIndex)
+                        refreshAuxBarKeysInDialog()
+                        currentLayout?.let { name ->
+                            previewManager.updatePreview(name, resolvePreviewLabel(), fcitxConnection)
                             updateSaveButtonState()
                         }
                     }
@@ -410,7 +486,7 @@ class TextKeyboardLayoutEditorActivity : AppCompatActivity() {
         buildSpinner()
         buildSubModeSpinner()
         buildRows()
-        run { val layoutName = currentLayout ?: return@run; previewManager.updatePreview(layoutName, previewSubModeLabel, fcitxConnection) }
+        run { val layoutName = currentLayout ?: return@run; previewManager.updatePreview(layoutName, resolvePreviewLabel(), fcitxConnection) }
         maybePromptSwitchToFcitxIme()
 
         // Show toast to indicate current editing layout
@@ -418,7 +494,9 @@ class TextKeyboardLayoutEditorActivity : AppCompatActivity() {
         currentLayout?.let { layoutName ->
             val subModeLabel = previewSubModeLabel
             val subModeKey = subModeLabel?.let { "$layoutName:$it" }
-            val hasDedicatedSubModeLayout = subModeKey != null && entries.containsKey(subModeKey)
+            val hasDedicatedSubModeLayout = subModeKey != null &&
+                (entries.containsKey(subModeKey) ||
+                    subModeManager.nameToIdMap[subModeLabel]?.let { entries.containsKey("$layoutName:$it") } == true)
 
             if (hasDedicatedSubModeLayout) {
                 showToast(getString(R.string.text_keyboard_layout_editing_submode, subModeLabel))
@@ -445,6 +523,8 @@ class TextKeyboardLayoutEditorActivity : AppCompatActivity() {
         menu.add(Menu.NONE, MENU_LAYOUT_FILE_DELETE_ID, Menu.NONE, getString(R.string.text_keyboard_layout_file_delete))
             .setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER)
         menu.add(Menu.NONE, MENU_LAYOUT_HEIGHT_OVERRIDE_ID, Menu.NONE, getString(R.string.text_keyboard_layout_layout_height_override))
+            .setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER)
+        menu.add(Menu.NONE, MENU_LAYOUT_AUX_BAR_ID, Menu.NONE, getString(R.string.text_keyboard_layout_aux_bar))
             .setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER)
         menu.add(Menu.NONE, MENU_QR_EXPORT_ID, Menu.NONE, getString(R.string.text_keyboard_layout_qr_export))
             .setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER)
@@ -491,6 +571,10 @@ class TextKeyboardLayoutEditorActivity : AppCompatActivity() {
         }
         MENU_LAYOUT_HEIGHT_OVERRIDE_ID -> {
             openLayoutHeightOverrideDialog()
+            true
+        }
+        MENU_LAYOUT_AUX_BAR_ID -> {
+            openAuxBarDialog()
             true
         }
         MENU_QR_EXPORT_ID -> {
@@ -576,8 +660,8 @@ class TextKeyboardLayoutEditorActivity : AppCompatActivity() {
 
         // 初始化 lastEditingTarget
         currentLayout?.let { layout ->
-            val subModeKey = previewSubModeLabel?.let { "$layout:$it" }
-            lastEditingTarget = if (subModeKey != null && entries.containsKey(subModeKey)) {
+            val subModeKey = resolveExistingSubModeKey(layout)
+            lastEditingTarget = if (subModeKey != null) {
                 subModeKey
             } else {
                 "$layout:default"
@@ -674,12 +758,15 @@ class TextKeyboardLayoutEditorActivity : AppCompatActivity() {
                 }
 
                 buildRows()
-                run { val layoutName = currentLayout ?: return@run; previewManager.updatePreview(layoutName, previewSubModeLabel, fcitxConnection) }
+                run { val layoutName = currentLayout ?: return@run; previewManager.updatePreview(layoutName, resolvePreviewLabel(), fcitxConnection) }
 
                 // Show toast when switching IME/layout - only if editing target changed
                 val layoutName = currentLayout ?: return@onItemSelected
-                val subModeKey = "$layoutName:${previewSubModeLabel ?: "default"}"
-                val newEditingTarget = if (entries.containsKey(subModeKey)) {
+                val subModeLabel = previewSubModeLabel
+                val subModeKey = "$layoutName:${subModeLabel ?: "default"}"
+                val hasEntry = entries.containsKey(subModeKey) ||
+                    subModeLabel?.let { subModeManager.nameToIdMap[it]?.let { entries.containsKey("$layoutName:$it") } } == true
+                val newEditingTarget = if (hasEntry) {
                     subModeKey
                 } else {
                     "$layoutName:default"
@@ -688,7 +775,7 @@ class TextKeyboardLayoutEditorActivity : AppCompatActivity() {
                 // Only show toast if the editing target changed
                 if (newEditingTarget != lastEditingTarget) {
                     lastEditingTarget = newEditingTarget
-                    if (entries.containsKey(subModeKey)) {
+                    if (hasEntry) {
                         showToast(getString(R.string.text_keyboard_layout_editing_submode, previewSubModeLabel ?: "default"))
                     } else {
                         showToast(getString(R.string.text_keyboard_layout_editing_default, layoutName))
@@ -810,8 +897,11 @@ class TextKeyboardLayoutEditorActivity : AppCompatActivity() {
         val subModeLabel = previewSubModeLabel?.takeIf { it.isNotBlank() }
         
         if (subModeLabel != null) {
+            val actualLabel = subModeManager.nameToIdMap[subModeLabel] ?: subModeLabel
             val subModeKey = "$layoutName:$subModeLabel"
-            val hasSubModeLayout = entries.containsKey(subModeKey)
+            val actualKey = if (actualLabel != subModeLabel) "$layoutName:$actualLabel" else null
+            val hasSubModeLayout = entries.containsKey(subModeKey) ||
+                (actualKey != null && entries.containsKey(actualKey))
             
             // Update add button: add submode layout if it doesn't exist
             if (!hasSubModeLayout) {
@@ -847,7 +937,9 @@ class TextKeyboardLayoutEditorActivity : AppCompatActivity() {
         val currentEditingLayoutKey = currentLayout?.let { layoutName ->
             previewSubModeLabel?.let { label ->
                 val subModeKey = "$layoutName:$label"
-                if (entries.containsKey(subModeKey)) subModeKey else layoutName
+                if (entries.containsKey(subModeKey)) subModeKey
+                else subModeManager.nameToIdMap[label]?.let { "$layoutName:$it" }?.takeIf { entries.containsKey(it) }
+                ?: layoutName
             } ?: layoutName
         }
         val copySourceOptions = entries.keys.sorted()
@@ -902,7 +994,7 @@ class TextKeyboardLayoutEditorActivity : AppCompatActivity() {
         buildSpinner()
         buildSubModeSpinner()
         buildRows()
-        run { val layoutName = currentLayout ?: return@run; previewManager.updatePreview(layoutName, previewSubModeLabel, fcitxConnection) }
+        run { val layoutName = currentLayout ?: return@run; previewManager.updatePreview(layoutName, resolvePreviewLabel(), fcitxConnection) }
         updateSaveButtonState()
         showToast(getString(R.string.text_keyboard_layout_editing_default, newName))
     }
@@ -932,25 +1024,24 @@ class TextKeyboardLayoutEditorActivity : AppCompatActivity() {
                 try {
                     previewSubModeLabel = selected
                     // Update preview and editor rows to show the selected submode layout
-                    run { val layoutName = currentLayout ?: return@run; previewManager.updatePreview(layoutName, previewSubModeLabel, fcitxConnection) }
+                    run { val layoutName = currentLayout ?: return@run; previewManager.updatePreview(layoutName, resolvePreviewLabel(), fcitxConnection) }
                     buildRows()
                     updateSaveButtonState()
 
                     // Show toast only when switching between different editing targets
                     val layoutName = currentLayout ?: return
                     val subModeKey = "$layoutName:$selected"
-                    val newEditingTarget = if (entries.containsKey(subModeKey)) {
-                        // Has dedicated submode layout
+                    val hasEntry = entries.containsKey(subModeKey) ||
+                        subModeManager.nameToIdMap[selected]?.let { entries.containsKey("$layoutName:$it") } == true
+                    val newEditingTarget = if (hasEntry) {
                         subModeKey
                     } else {
-                        // Editing default layout
                         "$layoutName:default"
                     }
 
-                    // Only show toast if the editing target changed
                     if (newEditingTarget != lastEditingTarget) {
                         lastEditingTarget = newEditingTarget
-                        if (entries.containsKey(subModeKey)) {
+                        if (hasEntry) {
                             showToast(getString(R.string.text_keyboard_layout_editing_submode, selected))
                         } else {
                             showToast(getString(R.string.text_keyboard_layout_editing_default, layoutName))
@@ -999,7 +1090,8 @@ class TextKeyboardLayoutEditorActivity : AppCompatActivity() {
         
         // Check if submode layout already exists
         val subModeKey = "$layoutName:$currentSubModeLabel"
-        if (entries.containsKey(subModeKey)) {
+        val idKey = subModeManager.nameToIdMap[currentSubModeLabel]?.let { "$layoutName:$it" }
+        if (entries.containsKey(subModeKey) || (idKey != null && entries.containsKey(idKey))) {
             // Submode layout already exists - show toast
             showToast(getString(R.string.text_keyboard_layout_submode_already_exists, currentSubModeLabel))
             return
@@ -1033,21 +1125,15 @@ class TextKeyboardLayoutEditorActivity : AppCompatActivity() {
         // Determine what to delete based on current previewSubModeLabel (what user is currently editing)
         val currentSubModeLabel = previewSubModeLabel?.takeIf { it.isNotBlank() }
 
-        // Check if we have a submode-specific layout to delete
-        val subModeKey = if (currentSubModeLabel != null && currentSubModeLabel != "default") {
-            "$layoutName:$currentSubModeLabel"
-        } else {
-            null
-        }
+        val editingLayoutKey = currentEditingLayoutKey()
+        val keyToDelete = if (
+            currentSubModeLabel != null &&
+            currentSubModeLabel != "default" &&
+            editingLayoutKey != null &&
+            editingLayoutKey != layoutName
+        ) editingLayoutKey else layoutName
 
-        val keyToDelete = if (subModeKey != null && entries.containsKey(subModeKey)) {
-            subModeKey
-        } else {
-            // Delete the base layout (default)
-            layoutName
-        }
-
-        val displayName = if (subModeKey != null && entries.containsKey(subModeKey)) {
+        val displayName = if (keyToDelete != layoutName && currentSubModeLabel != null) {
             "$layoutName ($currentSubModeLabel)"
         } else {
             layoutName
@@ -1129,7 +1215,7 @@ class TextKeyboardLayoutEditorActivity : AppCompatActivity() {
                 buildSpinner()
                 buildSubModeSpinner(forceResetSelection = true)
                 buildRows()
-                run { val layoutName = currentLayout ?: return@run; previewManager.updatePreview(layoutName, previewSubModeLabel, fcitxConnection) }
+                run { val layoutName = currentLayout ?: return@run; previewManager.updatePreview(layoutName, resolvePreviewLabel(), fcitxConnection) }
                 updateSaveButtonState()
             }
             .setNegativeButton(android.R.string.cancel, null)
@@ -1140,12 +1226,15 @@ class TextKeyboardLayoutEditorActivity : AppCompatActivity() {
      * Confirm and delete a submode-specific layout.
      */
     private fun confirmDeleteSubModeLayout(layoutName: String, subModeLabel: String) {
-        val subModeKey = "$layoutName:$subModeLabel"
+        val actualLabel = subModeManager.nameToIdMap[subModeLabel] ?: subModeLabel
+        val actualKey = "$layoutName:$actualLabel"
         AlertDialog.Builder(this)
             .setTitle(R.string.delete)
             .setMessage(getString(R.string.text_keyboard_layout_delete_submode_layout_confirm, subModeLabel))
             .setPositiveButton(R.string.delete) { _, _ ->
-                entries.remove(subModeKey)
+                entries.remove(actualKey)
+                val nameKey = "$layoutName:$subModeLabel"
+                if (nameKey != actualKey) entries.remove(nameKey)
 
                 // Switch to default or first available submode
                 val remainingLabels = subModeManager.extractSubModeLabelsFromLayout(layoutName)
@@ -1154,7 +1243,7 @@ class TextKeyboardLayoutEditorActivity : AppCompatActivity() {
 
                 buildSubModeSpinner(forceResetSelection = true)
                 buildRows()
-                run { val name = currentLayout ?: return@run; previewManager.updatePreview(name, previewSubModeLabel, fcitxConnection) }
+                run { val name = currentLayout ?: return@run; previewManager.updatePreview(name, resolvePreviewLabel(), fcitxConnection) }
                 updateSaveButtonState()
             }
             .setNegativeButton(android.R.string.cancel, null)
@@ -1196,7 +1285,7 @@ class TextKeyboardLayoutEditorActivity : AppCompatActivity() {
                 buildSpinner()
                 buildSubModeSpinner(forceResetSelection = true)
                 buildRows()
-                run { val name = currentLayout ?: return@run; previewManager.updatePreview(name, previewSubModeLabel, fcitxConnection) }
+                run { val name = currentLayout ?: return@run; previewManager.updatePreview(name, resolvePreviewLabel(), fcitxConnection) }
                 updateSaveButtonState()
             }
             .setNegativeButton(android.R.string.cancel, null)
@@ -1204,23 +1293,21 @@ class TextKeyboardLayoutEditorActivity : AppCompatActivity() {
     }
 
     private fun addSubModeLayout(layoutName: String, subModeLabel: String) {
-        val subModeKey = "$layoutName:$subModeLabel"
+        val actualLabel = subModeManager.nameToIdMap[subModeLabel] ?: subModeLabel
+        val subModeKey = "$layoutName:$actualLabel"
 
-        // 使用 dataManager 添加子模式布局
-        if (dataManager.addSubModeLayout(layoutName, subModeLabel)) {
-            // 更新状态
+        if (dataManager.addSubModeLayout(layoutName, actualLabel)) {
             currentLayout = layoutName
             previewSubModeLabel = subModeLabel
             lastEditingTarget = subModeKey
 
-            // 刷新 UI
             buildRows()
             buildSubModeSpinner(forceResetSelection = false)
-            run { val name = currentLayout ?: return@run; previewManager.updatePreview(name, previewSubModeLabel, fcitxConnection) }
+            run { val name = currentLayout ?: return@run; previewManager.updatePreview(name, resolvePreviewLabel(), fcitxConnection) }
             updateSaveButtonState()
-            showToast(getString(R.string.text_keyboard_layout_submode_added, subModeLabel))
+            showToast(getString(R.string.text_keyboard_layout_submode_added, actualLabel))
         } else {
-            showToast(getString(R.string.text_keyboard_layout_submode_already_exists, subModeLabel))
+            showToast(getString(R.string.text_keyboard_layout_submode_already_exists, actualLabel))
         }
     }
 
@@ -1231,15 +1318,15 @@ class TextKeyboardLayoutEditorActivity : AppCompatActivity() {
     private fun buildRows() {
         val layoutName = currentLayout ?: return
 
-        // Try to load submode-specific layout first
-        val subModeKey = previewSubModeLabel?.let { "$layoutName:$it" }
+        // Try to load submode-specific layout first (try both name and id key formats)
+        val subModeLabel = previewSubModeLabel?.takeIf { it.isNotBlank() }
+        val id = subModeLabel?.let { subModeManager.nameToIdMap[it] }
+        val subModeKey = subModeLabel?.let { "$layoutName:$it" }
+        val idKey = id?.let { "$layoutName:$it" }
+        val actualSubModeKey = listOfNotNull(subModeKey, idKey).firstOrNull { entries.containsKey(it) }
+        val key = actualSubModeKey ?: layoutName
 
-        // Determine which layout to edit
-        val rows = if (subModeKey != null && entries.containsKey(subModeKey)) {
-            entries[subModeKey]
-        } else {
-            entries[layoutName]
-        }
+        val rows = entries[key]
 
         // If rows is null or empty, recover by finding a valid layout
         if (rows == null || rows.isEmpty()) {
@@ -1250,7 +1337,7 @@ class TextKeyboardLayoutEditorActivity : AppCompatActivity() {
                 buildSubModeSpinner(forceResetSelection = true)
                 currentRowsRef = entries[validLayout] ?: mutableListOf()
                 rowsAdapter?.updateRows(currentRowsRef)
-                run { val name = currentLayout ?: return@run; previewManager.updatePreview(name, previewSubModeLabel, fcitxConnection) }
+                run { val name = currentLayout ?: return@run; previewManager.updatePreview(name, resolvePreviewLabel(), fcitxConnection) }
                 updateSaveButtonState()
             } else {
                 android.util.Log.e("TextKeyboardEditor", "No valid layout found in entries")
@@ -1311,7 +1398,7 @@ class TextKeyboardLayoutEditorActivity : AppCompatActivity() {
                     rowsRecyclerView.post {
                         rowsAdapter?.notifyDataSetChanged()
                         currentLayout?.let { name ->
-                            previewManager.updatePreview(name, previewSubModeLabel, fcitxConnection)
+                            previewManager.updatePreview(name, resolvePreviewLabel(), fcitxConnection)
                             updateSaveButtonState()
                         }
                     }
@@ -1325,7 +1412,6 @@ class TextKeyboardLayoutEditorActivity : AppCompatActivity() {
                     if (from >= 0 && from < currentRow.size && to >= 0 && to < currentRow.size) {
                         val item = currentRow.removeAt(from)
                         currentRow.add(to, item)
-                        updateSaveButtonState()
                     }
                 }
 
@@ -1336,7 +1422,8 @@ class TextKeyboardLayoutEditorActivity : AppCompatActivity() {
                             rowsAdapter?.notifyRowChanged(rowIndex)
                         }
                         currentLayout?.let { name ->
-                            previewManager.updatePreview(name, previewSubModeLabel, fcitxConnection)
+                            previewManager.updatePreview(name, resolvePreviewLabel(), fcitxConnection)
+                            updateSaveButtonState()
                         }
                     }
                 }
@@ -1441,21 +1528,98 @@ class TextKeyboardLayoutEditorActivity : AppCompatActivity() {
         updateLayoutButtonBehavior()
     }
 
+    /**
+     * Refresh the auxiliary bar keys editor inside the aux bar dialog.
+     */
+    private fun refreshAuxBarKeysInDialog() {
+        val adapter = auxBarDialogKeysAdapter ?: return
+        val rv = auxBarDialogKeysRv
+        val editingKey = currentEditingLayoutKey()
+        val keys = editingKey?.let { dataManager.getLayoutAuxBarKeys(it) }.orEmpty()
+        // Force a full layout pass so old chip views are not visible during dialog transitions
+        rv?.adapter = null
+        rv?.removeAllViewsInLayout()
+        adapter.updateKeys(keys)
+        rv?.adapter = adapter
+        // Synchronously measure and layout to avoid deferred frame rendering
+        if (rv != null && rv.width > 0) {
+            rv.measure(
+                View.MeasureSpec.makeMeasureSpec(rv.width, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(rv.height, View.MeasureSpec.UNSPECIFIED)
+            )
+            rv.layout(rv.left, rv.top, rv.right, rv.bottom)
+        }
+        val empty = keys.isEmpty()
+        auxBarDialogKeysEmptyHint?.visibility = if (empty) View.VISIBLE else View.GONE
+        rv?.visibility = View.VISIBLE
+    }
+
+    /**
+     * Open the key editor for an auxiliary bar key. Pass null to add a new key.
+     */
+    private fun openAuxBarKeyEditor(keyIndex: Int?) {
+        val layoutName = currentLayout ?: return
+        val editingLayoutKey = currentEditingLayoutKey() ?: return
+        val keys = dataManager.getLayoutAuxBarKeys(editingLayoutKey)
+        val keyData = keyIndex?.let { keys.getOrNull(it) }?.toMutableMap() ?: mutableMapOf()
+        val isEditingSubModeLayout = editingLayoutKey != layoutName
+
+        val isRime = subModeManager.isCurrentLayoutRime(layoutName)
+        val hasMultiSubmodeSupport = if (isRime) {
+            true
+        } else {
+            val (currentIme, fcitxLabels) = subModeManager.fetchCurrentImeAndSubModeLabels(layoutName)
+            fcitxLabels.size > 1
+        }
+
+        val launchIntent = Intent(this, KeyEditorActivity::class.java).apply {
+            putExtra(KeyEditorActivity.EXTRA_KEY_DATA, KeyEditorActivity.toSerializableMap(keyData))
+            putExtra(KeyEditorActivity.EXTRA_ROW_INDEX, -1)
+            keyIndex?.let { putExtra(KeyEditorActivity.EXTRA_KEY_INDEX, it) }
+            putExtra(KeyEditorActivity.EXTRA_IS_EDITING_SUBMODE_LAYOUT, isEditingSubModeLayout)
+            putExtra(KeyEditorActivity.EXTRA_CURRENT_SUBMODE_LABEL, previewSubModeLabel)
+            putExtra(KeyEditorActivity.EXTRA_HAS_MULTI_SUBMODE_SUPPORT, hasMultiSubmodeSupport)
+            putStringArrayListExtra(
+                KeyEditorActivity.EXTRA_AVAILABLE_LAYOUT_TARGETS,
+                ArrayList(entries.keys.sorted())
+            )
+        }
+        auxBarKeyEditorLauncher.launch(launchIntent)
+    }
+
+    private fun confirmDeleteAuxBarKey(keyIndex: Int) {
+        val dialog = AlertDialog.Builder(this)
+            .setTitle(R.string.delete)
+            .setMessage(R.string.text_keyboard_layout_aux_bar_keys_delete_confirm)
+            .setPositiveButton(R.string.delete) { _, _ ->
+                val editingLayoutKey = currentEditingLayoutKey() ?: return@setPositiveButton
+                val keys = dataManager.getLayoutAuxBarKeysRef(editingLayoutKey)
+                if (keyIndex in keys.indices) {
+                    keys.removeAt(keyIndex)
+                    refreshAuxBarKeysInDialog()
+                    currentLayout?.let { name ->
+                        previewManager.updatePreview(name, resolvePreviewLabel(), fcitxConnection)
+                        updateSaveButtonState()
+                    }
+                }
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .create()
+        dialog.setOnShowListener { styleDialogTypography(dialog) }
+        dialog.show()
+    }
+
     private fun openKeyEditor(rowIndex: Int, keyIndex: Int?) {
         val layoutName = currentLayout ?: return
 
         // Get the correct layout to edit (submode or default)
-        val subModeKey = previewSubModeLabel?.let { "$layoutName:$it" }
-        val row = if (subModeKey != null && entries.containsKey(subModeKey)) {
-            entries[subModeKey]
-        } else {
-            entries[layoutName]
-        } ?: return
+        val editingLayoutKey = currentEditingLayoutKey() ?: return
+        val row = entries[editingLayoutKey] ?: return
 
         if (rowIndex >= row.size) return
 
         val keyData = keyIndex?.let { row[rowIndex][keyIndex] }?.toMap() ?: mutableMapOf()
-        val isEditingSubModeLayout = subModeKey != null && entries.containsKey(subModeKey)
+        val isEditingSubModeLayout = editingLayoutKey != layoutName
 
         // Check if the current IME supports multiple submodes
         // Rime IME always supports multiple submodes (schemes)
@@ -1491,12 +1655,8 @@ class TextKeyboardLayoutEditorActivity : AppCompatActivity() {
                 val layoutName = currentLayout ?: return@setPositiveButton
 
                 // Get the correct layout to edit (submode or default)
-                val subModeKey = previewSubModeLabel?.let { "$layoutName:$it" }
-                val row = if (subModeKey != null && entries.containsKey(subModeKey)) {
-                    entries[subModeKey]
-                } else {
-                    entries[layoutName]
-                } ?: return@setPositiveButton
+                val editingLayoutKey = currentEditingLayoutKey() ?: return@setPositiveButton
+                val row = entries[editingLayoutKey] ?: return@setPositiveButton
 
                 if (rowIndex < row.size) {
                     row.removeAt(rowIndex)
@@ -1504,7 +1664,7 @@ class TextKeyboardLayoutEditorActivity : AppCompatActivity() {
                     rowsAdapter?.notifyRowRemoved(rowIndex)
                     // Update preview
                     currentLayout?.let { name ->
-                        previewManager.updatePreview(name, previewSubModeLabel, fcitxConnection)
+                        previewManager.updatePreview(name, resolvePreviewLabel(), fcitxConnection)
                         updateSaveButtonState()
                     }
                 }
@@ -1520,12 +1680,8 @@ class TextKeyboardLayoutEditorActivity : AppCompatActivity() {
         val layoutName = currentLayout ?: return
 
         // Get the correct layout to edit (submode or default)
-        val subModeKey = previewSubModeLabel?.let { "$layoutName:$it" }
-        val rows = if (subModeKey != null && entries.containsKey(subModeKey)) {
-            entries[subModeKey]
-        } else {
-            entries[layoutName]
-        } ?: return
+        val editingLayoutKey = currentEditingLayoutKey() ?: return
+        val rows = entries[editingLayoutKey] ?: return
 
         rows.add(mutableListOf())
         val newPosition = rows.size - 1
@@ -1535,7 +1691,7 @@ class TextKeyboardLayoutEditorActivity : AppCompatActivity() {
         rowsRecyclerView.scrollToPosition(newPosition)
         // Update preview
         currentLayout?.let { name ->
-            previewManager.updatePreview(name, previewSubModeLabel, fcitxConnection)
+            previewManager.updatePreview(name, resolvePreviewLabel(), fcitxConnection)
             updateSaveButtonState()
         }
     }
@@ -1800,7 +1956,7 @@ class TextKeyboardLayoutEditorActivity : AppCompatActivity() {
                 buildSpinner()
                 buildSubModeSpinner()
                 buildRows()
-                run { val layoutName = currentLayout ?: return@run; previewManager.updatePreview(layoutName, previewSubModeLabel, fcitxConnection) }
+                run { val layoutName = currentLayout ?: return@run; previewManager.updatePreview(layoutName, resolvePreviewLabel(), fcitxConnection) }
                 updateSaveButtonState() // Update save button state
                 
                 // Show toast for new IME layout
@@ -1881,7 +2037,7 @@ class TextKeyboardLayoutEditorActivity : AppCompatActivity() {
     private fun refreshPreviewFromSpinnerSelection() {
         syncEditingTargetFromSpinnerSelection()
         currentLayout?.let { layoutName ->
-            previewManager.updatePreview(layoutName, previewSubModeLabel, fcitxConnection)
+            previewManager.updatePreview(layoutName, resolvePreviewLabel(), fcitxConnection)
         }
     }
 
@@ -1994,11 +2150,9 @@ class TextKeyboardLayoutEditorActivity : AppCompatActivity() {
         }
         container.addView(helper)
 
-        val scroll = android.widget.ScrollView(this).apply { addView(container) }
-
         val dialog = AlertDialog.Builder(this)
             .setTitle(getString(R.string.text_keyboard_layout_layout_height_override_title, layoutName))
-            .setView(scroll)
+            .setView(container)
             .setPositiveButton(android.R.string.ok, null)
             .setNegativeButton(android.R.string.cancel, null)
             .create()
@@ -2007,7 +2161,159 @@ class TextKeyboardLayoutEditorActivity : AppCompatActivity() {
                 dataManager.setLayoutHeightPercentOverride(layoutName, portraitSection.readCurrentPercent())
                 dataManager.setLayoutHeightPercentOverrideLandscape(layoutName, landscapeSection.readCurrentPercent())
                 currentLayout?.let { name ->
-                    previewManager.updatePreview(name, previewSubModeLabel, fcitxConnection)
+                    previewManager.updatePreview(name, resolvePreviewLabel(), fcitxConnection)
+                }
+                updateSaveButtonState()
+                dialog.dismiss()
+            }
+        }
+        dialog.show()
+    }
+
+    private fun openAuxBarDialog() {
+        val layoutName = currentEditingLayoutKey() ?: return
+        val currentConfig = dataManager.getLayoutAuxBarConfig(layoutName)
+
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            val pad = dp(12)
+            setPadding(pad, pad, pad, pad)
+        }
+
+        val positionLabel = TextView(this).apply {
+            text = getString(R.string.text_keyboard_layout_aux_bar_position)
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            setPadding(0, 0, 0, dp(4))
+        }
+        val positionSpinner = Spinner(this)
+        val positions = listOf(
+            getString(R.string.text_keyboard_layout_aux_bar_none) to null,
+            getString(R.string.text_keyboard_layout_aux_bar_left) to AuxBarPosition.Left,
+            getString(R.string.text_keyboard_layout_aux_bar_right) to AuxBarPosition.Right,
+            getString(R.string.text_keyboard_layout_aux_bar_top) to AuxBarPosition.Top,
+            getString(R.string.text_keyboard_layout_aux_bar_bottom) to AuxBarPosition.Bottom,
+            getString(R.string.text_keyboard_layout_aux_bar_above_preedit) to AuxBarPosition.AbovePreedit
+        )
+        val positionLabels = positions.map { it.first }
+        positionSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, positionLabels)
+        val initialPosIdx = if (currentConfig == null) 0 else
+            positions.indexOfFirst { it.second == currentConfig.position }.coerceAtLeast(0)
+
+        val sizeLabel = TextView(this).apply {
+            text = getString(R.string.text_keyboard_layout_aux_bar_size_percent)
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            setPadding(0, dp(10), 0, dp(4))
+        }
+        val sizeSeek = SeekBar(this).apply {
+            max = 90 // 5..95
+            progress = (currentConfig?.sizePercent?.takeIf { it > 0f }?.toInt()?.minus(5)?.coerceIn(0, 90)) ?: 10
+        }
+        val sizeValue = TextView(this).apply {
+            val pct = currentConfig?.sizePercent?.takeIf { it > 0f }?.toInt() ?: 15
+            text = "$pct%"
+            textSize = 16f
+        }
+        val abovePreeditIdx = positions.indexOfFirst { it.second == AuxBarPosition.AbovePreedit }
+        val showSize = initialPosIdx > 0 && initialPosIdx != abovePreeditIdx
+        sizeSeek.isEnabled = showSize
+        sizeSeek.alpha = if (showSize) 1f else 0.5f
+        sizeValue.alpha = if (showSize) 1f else 0.5f
+        sizeLabel.alpha = if (showSize) 1f else 0.5f
+        sizeSeek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                sizeValue.text = "${progress + 5}%"
+            }
+            override fun onStartTrackingTouch(seekBar: SeekBar?) = Unit
+            override fun onStopTrackingTouch(seekBar: SeekBar?) = Unit
+        })
+        positionSpinner.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: View?, pos: Int, id: Long) {
+                val show = pos > 0 && pos != abovePreeditIdx
+                sizeSeek.isEnabled = show
+                sizeSeek.alpha = if (show) 1f else 0.5f
+                sizeValue.alpha = if (show) 1f else 0.5f
+                sizeLabel.alpha = if (show) 1f else 0.5f
+            }
+            override fun onNothingSelected(parent: android.widget.AdapterView<*>?) = Unit
+        }
+        positionSpinner.setSelection(initialPosIdx)
+
+        container.addView(positionLabel)
+        container.addView(positionSpinner)
+        container.addView(sizeLabel)
+        container.addView(sizeSeek)
+        container.addView(sizeValue)
+
+        // Aux bar keys editor section (keys shown in the aux bar when there are no tabs)
+        val keysTitle = TextView(this).apply {
+            text = getString(R.string.text_keyboard_layout_aux_bar_keys_title)
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            setPadding(0, dp(12), 0, dp(2))
+        }
+        val keysRv = RecyclerView(this).apply {
+            layoutManager = LinearLayoutManager(this@TextKeyboardLayoutEditorActivity, LinearLayoutManager.HORIZONTAL, false)
+            itemAnimator = null
+        }
+        val keysEmpty = TextView(this).apply {
+            text = getString(R.string.text_keyboard_layout_aux_bar_keys_empty)
+            textSize = 13f
+            setTextColor(styledColor(android.R.attr.textColorSecondary))
+        }
+        auxBarDialogKeysRv = keysRv
+        auxBarDialogKeysEmptyHint = keysEmpty
+        auxBarDialogKeysAdapter = AuxBarKeysAdapter(this, object : AuxBarKeysAdapter.Listener {
+            override fun onKeyClick(index: Int) {
+                openAuxBarKeyEditor(index)
+            }
+
+            override fun onKeyLongClick(index: Int) {
+                confirmDeleteAuxBarKey(index)
+            }
+
+            override fun onAddKeyClick() {
+                openAuxBarKeyEditor(null)
+            }
+        })
+        keysRv.adapter = auxBarDialogKeysAdapter
+        container.addView(keysTitle)
+        container.addView(
+            keysRv,
+            LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+        )
+        container.addView(
+            keysEmpty,
+            LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+        )
+        refreshAuxBarKeysInDialog()
+
+        val scrollView = android.widget.ScrollView(this).apply {
+            addView(container, ViewGroup.LayoutParams(matchParent, wrapContent))
+        }
+
+        val dialog = AlertDialog.Builder(this)
+            .setTitle(getString(R.string.text_keyboard_layout_aux_bar_title, layoutName))
+            .setView(scrollView)
+            .setPositiveButton(android.R.string.ok, null)
+            .setNegativeButton(android.R.string.cancel, null)
+            .create()
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val selectedIdx = positionSpinner.selectedItemPosition
+                val config = if (selectedIdx > 0) {
+                    val pos = positions[selectedIdx].second!!
+                    val size = if (pos == AuxBarPosition.AbovePreedit) currentConfig?.sizePercent ?: 15f
+                        else (sizeSeek.progress + 5).toFloat()
+                    AuxBarConfig(pos, size)
+                } else null
+                dataManager.setLayoutAuxBarConfig(layoutName, config)
+                currentLayout?.let { name ->
+                    previewManager.updatePreview(name, resolvePreviewLabel(), fcitxConnection)
                 }
                 updateSaveButtonState()
                 dialog.dismiss()
@@ -2020,7 +2326,10 @@ class TextKeyboardLayoutEditorActivity : AppCompatActivity() {
         val base = currentLayout ?: return null
         val subModeLabel = previewSubModeLabel?.takeIf { it.isNotBlank() } ?: return base
         val subModeKey = "$base:$subModeLabel"
-        return if (entries.containsKey(subModeKey)) subModeKey else base
+        if (entries.containsKey(subModeKey)) return subModeKey
+        val id = subModeManager.nameToIdMap[subModeLabel]?.let { "$base:$it" }
+        if (id != null && entries.containsKey(id)) return id
+        return base
     }
 
     private fun currentActiveProfile(): String {
@@ -2044,7 +2353,7 @@ class TextKeyboardLayoutEditorActivity : AppCompatActivity() {
         buildSubModeSpinner(forceResetSelection = true)
         buildRows()
         currentLayout?.let { layoutName ->
-            previewManager.updatePreview(layoutName, previewSubModeLabel, fcitxConnection)
+            previewManager.updatePreview(layoutName, resolvePreviewLabel(), fcitxConnection)
         }
         updateSaveButtonState()
         if (showSwitchToast) {
@@ -2609,7 +2918,7 @@ class TextKeyboardLayoutEditorActivity : AppCompatActivity() {
     private suspend fun captureLayoutPreviewForQrShare(): android.graphics.Bitmap? = withContext(Dispatchers.Main) {
         val layoutName = currentLayout ?: return@withContext null
         // Ensure preview is refreshed to current editing target before capture.
-        previewManager.updatePreview(layoutName, previewSubModeLabel, fcitxConnection)
+        previewManager.updatePreview(layoutName, resolvePreviewLabel(), fcitxConnection)
         repeat(10) {
             previewKeyboardContainer.requestLayout()
             previewKeyboardContainer.invalidate()
@@ -2801,7 +3110,7 @@ class TextKeyboardLayoutEditorActivity : AppCompatActivity() {
                     buildSubModeSpinner(forceResetSelection = true)
                     buildRows()
                     currentLayout?.let { layoutName ->
-                        previewManager.updatePreview(layoutName, previewSubModeLabel, fcitxConnection)
+                        previewManager.updatePreview(layoutName, resolvePreviewLabel(), fcitxConnection)
                     }
                     updateSaveButtonState()
                     val profileLabel = displayProfile(targetProfile)
@@ -2825,6 +3134,7 @@ class TextKeyboardLayoutEditorActivity : AppCompatActivity() {
         private const val MENU_LAYOUT_FILE_RENAME_ID = 3004
         private const val MENU_LAYOUT_FILE_DELETE_ID = 3005
         private const val MENU_LAYOUT_HEIGHT_OVERRIDE_ID = 3006
+        private const val MENU_LAYOUT_AUX_BAR_ID = 3010
         private const val MENU_QR_EXPORT_ID = 3007
         private const val MENU_QR_IMPORT_SCAN_ID = 3008
         private const val MENU_QR_IMPORT_IMAGE_ID = 3009
@@ -2839,4 +3149,106 @@ class TextKeyboardLayoutEditorActivity : AppCompatActivity() {
         val layoutHeightOverrides: Map<String, Int>,
         val layoutHeightOverridesLandscape: Map<String, Int>
     )
+
+    /**
+     * Horizontal chip adapter for editing auxiliary bar keys.
+     */
+    private class AuxBarKeysAdapter(
+        private val activity: TextKeyboardLayoutEditorActivity,
+        private val listener: Listener
+    ) : RecyclerView.Adapter<AuxBarKeysAdapter.ChipViewHolder>() {
+
+        private var keys = listOf<Map<String, Any?>>()
+
+        interface Listener {
+            fun onKeyClick(index: Int)
+            fun onKeyLongClick(index: Int)
+            fun onAddKeyClick()
+        }
+
+        fun updateKeys(newKeys: List<Map<String, Any?>>) {
+            keys = newKeys
+            notifyDataSetChanged()
+        }
+
+        override fun getItemCount() = keys.size + 1
+
+        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ChipViewHolder {
+            val chip = TextView(activity).apply {
+                textSize = 14f
+                gravity = Gravity.CENTER
+                setPadding(activity.dp(10), activity.dp(8), activity.dp(10), activity.dp(8))
+            }
+            val lp = RecyclerView.LayoutParams(
+                RecyclerView.LayoutParams.WRAP_CONTENT,
+                RecyclerView.LayoutParams.WRAP_CONTENT
+            ).apply { rightMargin = activity.dp(6) }
+            chip.layoutParams = lp
+            return ChipViewHolder(chip)
+        }
+
+        override fun onBindViewHolder(holder: ChipViewHolder, position: Int) {
+            val chip = holder.chip
+            if (position == keys.size) {
+                // Add button - inherit the theme default text color so it adapts to light/dark
+                chip.text = "+"
+                chip.setTypeface(null, android.graphics.Typeface.BOLD)
+                chip.background = android.graphics.drawable.GradientDrawable().apply {
+                    setColor(activity.styledColor(android.R.attr.colorPrimary))
+                    setStroke(activity.dp(1), activity.styledColor(android.R.attr.colorControlNormal))
+                    cornerRadius = activity.dp(4).toFloat()
+                }
+                chip.setTextColor(activity.styledColor(android.R.attr.textColorPrimary))
+                chip.setOnClickListener { listener.onAddKeyClick() }
+                chip.setOnLongClickListener(null)
+            } else {
+                val key = keys[position]
+                val type = key["type"] as? String ?: ""
+                val isMacroKey = type == "MacroKey"
+                chip.text = activity.buildKeyLabelForEditor(key)
+                chip.setTypeface(null, android.graphics.Typeface.NORMAL)
+                chip.background = android.graphics.drawable.GradientDrawable().apply {
+                    if (isMacroKey) {
+                        setColor(activity.styledColor(android.R.attr.colorAccent))
+                        setStroke(activity.dp(2), activity.styledColor(android.R.attr.colorControlHighlight))
+                    } else {
+                        setColor(activity.styledColor(android.R.attr.colorButtonNormal))
+                        setStroke(activity.dp(1), activity.styledColor(android.R.attr.colorControlNormal))
+                    }
+                    cornerRadius = activity.dp(4).toFloat()
+                }
+                chip.setTextColor(
+                    if (isMacroKey) activity.styledColor(android.R.attr.textColorPrimaryInverse)
+                    else activity.styledColor(android.R.attr.textColorPrimary)
+                )
+                chip.setOnClickListener { listener.onKeyClick(position) }
+                chip.setOnLongClickListener {
+                    listener.onKeyLongClick(position)
+                    true
+                }
+            }
+        }
+
+        class ChipViewHolder(val chip: TextView) : RecyclerView.ViewHolder(chip)
+    }
+
+    private fun buildKeyLabelForEditor(key: Map<String, Any?>): String {
+        val type = key["type"] as? String ?: "?"
+        return when (type) {
+            "AlphabetKey" -> (key["main"] as? String)?.ifEmpty { "?" } ?: "?"
+            "CapsKey" -> getString(R.string.text_keyboard_layout_key_label_caps)
+            "LayoutSwitchKey" -> key["label"] as? String ?: "?123"
+            "CommaKey" -> ","
+            "LanguageKey" -> getString(R.string.text_keyboard_layout_key_label_lang)
+            "SpaceKey" -> getString(R.string.text_keyboard_layout_key_label_space)
+            "SymbolKey" -> key["label"] as? String ?: "."
+            "ReturnKey" -> getString(R.string.text_keyboard_layout_key_label_enter)
+            "BackspaceKey" -> "⌫"
+            "MacroKey" -> {
+                val label = key["label"] as? String ?: "M"
+                label.ifEmpty { "M" }
+            }
+            else -> type
+        }
+    }
 }

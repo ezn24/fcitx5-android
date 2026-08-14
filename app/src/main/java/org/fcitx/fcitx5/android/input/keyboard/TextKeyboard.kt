@@ -6,10 +6,15 @@ package org.fcitx.fcitx5.android.input.keyboard
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.content.res.ColorStateList
+import android.graphics.drawable.Drawable
 import android.view.View
+import android.widget.ImageView
 import androidx.annotation.Keep
+import org.fcitx.fcitx5.android.data.theme.IconThemeManager
 import androidx.core.view.allViews
 import java.lang.ref.WeakReference
+import java.util.WeakHashMap
 import org.fcitx.fcitx5.android.R
 import org.fcitx.fcitx5.android.core.InputMethodEntry
 import org.fcitx.fcitx5.android.core.KeyState
@@ -28,7 +33,7 @@ import org.fcitx.fcitx5.android.ui.main.settings.behavior.utils.LayoutJsonUtils
 class TextKeyboard(
     context: Context,
     theme: Theme
-) : BaseKeyboard(context, theme, ::getLayout) {
+) : BaseKeyboard(context, theme, ::getLayout, ::getAuxBarConfig, ::getAuxBarKeyDefs) {
 
     enum class CapsState { None, Once, Lock }
 
@@ -37,6 +42,7 @@ class TextKeyboard(
         private const val LAYOUT_META_KEY = "__meta__"
         private const val LAYOUT_META_HEIGHT_PERCENT_KEY = "keyboard_height_percent"
         private const val LAYOUT_META_HEIGHT_PERCENT_LANDSCAPE_KEY = "keyboard_height_percent_landscape"
+        private const val LAYOUT_META_AUX_BAR_KEY = "aux_bar"
         private var lastModified = 0L
         var ime: InputMethodEntry? = null
         private var listenerRegistered = false
@@ -113,14 +119,18 @@ class TextKeyboard(
 
         // Cache for parsed KeyDef layouts to avoid recreating them on every reloadLayout()
         private val cachedKeyDefLayouts = mutableMapOf<String, List<List<KeyDef>>>()
+        private val cachedAuxBarConfigs = mutableMapOf<String, AuxBarConfig?>()
         private var lastLayoutCacheInvalidated = 0L
         private var forcedLayoutKey: String? = null
+        var resolvedAuxBarConfig: AuxBarConfig? = null
+        var resolvedAuxBarKeys: List<Map<String, Any?>> = emptyList()
 
         /**
          * Clear KeyDef layout cache. Call this after saving layout changes.
          */
         fun clearCachedKeyDefLayouts() {
             cachedKeyDefLayouts.clear()
+            cachedAuxBarConfigs.clear()
             lastLayoutCacheInvalidated = 0L
         }
 
@@ -168,13 +178,14 @@ class TextKeyboard(
             val imeLayoutElement = json[currentIme.uniqueName] ?: json[currentIme.displayName]
             if (imeLayoutElement != null) {
                 val subModeLabel = currentIme.subMode.label
-                val subModeLayoutElement = if (imeLayoutElement is JsonObject) {
-                    imeLayoutElement[subModeLabel]
-                        ?: imeLayoutElement["default"]
-                        ?: imeLayoutElement[""]
-                } else {
-                    imeLayoutElement
-                }
+                val subModeName = currentIme.subMode.name
+                val schemaId = schemaIdFromSubModeIcon(currentIme.subMode.icon)
+                val subModeLayoutElement = resolveSubModeLayoutElement(
+                    imeLayoutElement = imeLayoutElement,
+                    subModeLabel = subModeLabel,
+                    schemaId = schemaId,
+                    subModeName = subModeName
+                )
                 if (parseLayoutArray(subModeLayoutElement) != null) {
                     return parseLayoutHeightPercentOverride(subModeLayoutElement)
                         ?: parseLayoutHeightPercentOverride(imeLayoutElement)
@@ -206,13 +217,63 @@ class TextKeyboard(
                 if (json != null && containsLayoutKey(json, forced)) return forced
             }
             val base = currentBaseLayoutKey() ?: return null
-            val subModeLabel = ime?.subMode?.label?.takeIf { it.isNotEmpty() }
-            val subModeKey = subModeLabel?.let { "$base:$it" }
-            return if (json != null && subModeKey != null && containsLayoutKey(json, subModeKey)) {
-                subModeKey
+            if (json == null) return base
+            val subMode = ime?.subMode
+            val subModeKey = resolveExistingSubModeKey(
+                json = json,
+                base = base,
+                subModeLabel = subMode?.label.orEmpty(),
+                schemaId = schemaIdFromSubModeIcon(subMode?.icon.orEmpty()),
+                subModeName = subMode?.name.orEmpty()
+            )
+            return subModeKey ?: base
+        }
+
+        private fun schemaIdFromSubModeIcon(icon: String): String {
+            return if (icon.startsWith("fcitx-rime:")) {
+                icon.substringAfter("fcitx-rime:")
             } else {
-                base
+                ""
             }
+        }
+
+        private fun subModeCandidates(
+            subModeLabel: String,
+            schemaId: String,
+            subModeName: String
+        ): List<String> {
+            return listOf(schemaId, subModeLabel, subModeName)
+                .map { it.trim() }
+                .filter { it.isNotEmpty() }
+                .distinct()
+        }
+
+        private fun resolveSubModeLayoutElement(
+            imeLayoutElement: JsonElement,
+            subModeLabel: String,
+            schemaId: String,
+            subModeName: String
+        ): JsonElement? {
+            return if (imeLayoutElement is JsonObject) {
+                val matched = subModeCandidates(subModeLabel, schemaId, subModeName)
+                    .firstNotNullOfOrNull { key -> imeLayoutElement[key] }
+                matched ?: imeLayoutElement["default"] ?: imeLayoutElement[""]
+            } else {
+                imeLayoutElement
+            }
+        }
+
+        private fun resolveExistingSubModeKey(
+            json: JsonObject,
+            base: String,
+            subModeLabel: String,
+            schemaId: String,
+            subModeName: String
+        ): String? {
+            val candidate = subModeCandidates(subModeLabel, schemaId, subModeName)
+                .firstOrNull { sub -> containsLayoutKey(json, "$base:$sub") }
+                ?: return null
+            return "$base:$candidate"
         }
 
         @Synchronized
@@ -299,6 +360,59 @@ class TextKeyboard(
                 readKey(LAYOUT_META_HEIGHT_PERCENT_LANDSCAPE_KEY) ?: readKey(LAYOUT_META_HEIGHT_PERCENT_KEY)
             } else {
                 readKey(LAYOUT_META_HEIGHT_PERCENT_KEY)
+            }
+        }
+
+        private fun parseAuxBarConfig(layoutElement: JsonElement?): AuxBarConfig? {
+            val objectElement = layoutElement as? JsonObject ?: return null
+            val meta = objectElement[LAYOUT_META_KEY] as? JsonObject ?: return null
+            val auxBarConfig = meta[LAYOUT_META_AUX_BAR_KEY] as? JsonObject ?: return null
+            val position = when (auxBarConfig["position"]?.jsonPrimitive?.content) {
+                "top" -> AuxBarPosition.Top
+                "bottom" -> AuxBarPosition.Bottom
+                "left" -> AuxBarPosition.Left
+                "right" -> AuxBarPosition.Right
+                "above_preedit" -> AuxBarPosition.AbovePreedit
+                else -> return null
+            }
+            val sizePercent = if (position == AuxBarPosition.AbovePreedit) {
+                0f
+            } else {
+                auxBarConfig["size_percent"]?.jsonPrimitive?.floatOrNull
+                    ?.takeIf { it.isFinite() }
+                    ?.coerceIn(5f, 95f)
+                    ?: return null
+            }
+            return AuxBarConfig(position, sizePercent)
+        }
+
+        fun getAuxBarConfig(): AuxBarConfig? = resolvedAuxBarConfig
+
+        /**
+         * 解析辅助选择栏的附加自定义按键（无 tabs 时用于填充辅助选择栏）。
+         */
+        private fun parseAuxBarKeys(layoutElement: JsonElement?): List<Map<String, Any?>> {
+            val objectElement = layoutElement as? JsonObject ?: return emptyList()
+            val meta = objectElement[LAYOUT_META_KEY] as? JsonObject ?: return emptyList()
+            val auxBarConfig = meta[LAYOUT_META_AUX_BAR_KEY] as? JsonObject ?: return emptyList()
+            val keysElement = auxBarConfig["keys"] as? JsonArray ?: return emptyList()
+            val rows = LayoutJsonUtils.parseLayoutRows(JsonArray(listOf(keysElement)))
+            return rows.firstOrNull() ?: emptyList()
+        }
+
+        fun getAuxBarKeyDefs(): List<KeyDef> {
+            val currentIme = ime
+            val subModeLabel = currentIme?.subMode?.label.orEmpty()
+            val subModeName = currentIme?.subMode?.name.orEmpty()
+            val schemaId = schemaIdFromSubModeIcon(currentIme?.subMode?.icon.orEmpty())
+            return resolvedAuxBarKeys.mapNotNull { keyMap ->
+                runCatching {
+                    val jsonObject = JsonObject(
+                        keyMap.mapValues { (_, v) -> LayoutJsonUtils.convertToJsonProperty(v) }
+                    )
+                    val keyJson = LayoutJsonUtils.parseKeyJson(jsonObject) ?: return@runCatching null
+                    LayoutJsonUtils.createKeyDef(keyJson, subModeLabel, schemaId, subModeName)
+                }.getOrNull()
             }
         }
 
@@ -389,13 +503,40 @@ class TextKeyboard(
         val textLayoutJson: JsonObject?
             @Synchronized
             get() {
-                val snapshot = org.fcitx.fcitx5.android.input.config.ConfigProviders
-                    .readTextKeyboardLayout<JsonObject>() ?: run {
+                val providers = org.fcitx.fcitx5.android.input.config.ConfigProviders
+                val provider = providers.provider
+                val memoryJson = provider.textKeyboardLayoutJson()
+                if (memoryJson != null) {
+                    providers.ensureWatching()
+                    if (cachedRawLayoutJson !== memoryJson || lastRawLayoutFile != null) {
+                        cachedRawLayoutJson = memoryJson
+                        lastRawLayoutFile = null
+                        // Keep an in-memory snapshot distinct from a missing default file,
+                        // which also has a null path and zero last-modified timestamp.
+                        lastRawModified = Long.MIN_VALUE
+                        lastLayoutCacheInvalidated = 0L
+                        cachedKeyDefLayouts.clear()
+                    }
+                    return cachedRawLayoutJson
+                }
+
+                val file = provider.textKeyboardLayoutFile()
+                val currentFile = file?.absolutePath
+                val currentModified = file?.takeIf { it.exists() }?.lastModified() ?: 0L
+                if (cachedRawLayoutJson != null &&
+                    currentFile == lastRawLayoutFile &&
+                    currentModified == lastRawModified
+                ) {
+                    providers.ensureWatching()
+                    return cachedRawLayoutJson
+                }
+
+                val snapshot = providers.readTextKeyboardLayout<JsonObject>() ?: run {
                     cachedRawLayoutJson = null
                     lastRawLayoutFile = null
+                    lastRawModified = 0L
                     return null
                 }
-                val currentFile = snapshot.file?.absolutePath
                 if (cachedRawLayoutJson == null ||
                     currentFile != lastRawLayoutFile ||
                     snapshot.lastModified != lastRawModified
@@ -418,6 +559,14 @@ class TextKeyboard(
         fun getLayout(): List<List<KeyDef>> {
             val imeName = ime?.uniqueName
             val subModeLabel = ime?.subMode?.label ?: ""
+            val subModeName = ime?.subMode?.name ?: ""
+            val schemaId = schemaIdFromSubModeIcon(ime?.subMode?.icon ?: "")
+            val displayTextContextCacheKey = listOf(schemaId, subModeLabel, subModeName)
+                .map { it.trim() }
+                .filter { it.isNotEmpty() }
+                .distinct()
+                .joinToString(separator = "|")
+                .ifEmpty { "none" }
             val showLangSwitch = AppPrefs.getInstance().keyboard.showLangSwitchKey.getValue()
             val json = textLayoutJson
 
@@ -425,7 +574,7 @@ class TextKeyboard(
                 if (json != null) {
                     val forcedLayout = findLayoutElementByKey(json, forced)
                     if (forcedLayout != null) {
-                        val cacheKey = "forced:$forced:$showLangSwitch"
+                        val cacheKey = "forced:$forced:$showLangSwitch:$displayTextContextCacheKey"
                         val baseName = forced.substringBefore(':')
                         val forcedSub = forced.substringAfter(':', "")
                         resolvedLayoutHeightPercentOverride = if (forcedSub.isNotEmpty()) {
@@ -434,10 +583,30 @@ class TextKeyboard(
                         } else {
                             parseLayoutHeightPercentOverride(json[baseName])
                         }
+                        resolvedAuxBarConfig = if (forcedSub.isNotEmpty()) {
+                            parseAuxBarConfig((json[baseName] as? JsonObject)?.get(forcedSub))
+                                ?: parseAuxBarConfig(json[baseName])
+                        } else {
+                            parseAuxBarConfig(json[baseName])
+                        }
+                        resolvedAuxBarKeys = if (forcedSub.isNotEmpty()) {
+                            parseAuxBarKeys((json[baseName] as? JsonObject)?.get(forcedSub))
+                                .ifEmpty { parseAuxBarKeys(json[baseName]) }
+                        } else {
+                            parseAuxBarKeys(json[baseName])
+                        }
+                        cachedAuxBarConfigs[cacheKey] = resolvedAuxBarConfig
                         return cachedKeyDefLayouts.getOrPut(cacheKey) {
                             forcedLayout.map { rowElement ->
                                 LayoutJsonUtils.parseKeyJsonArray(rowElement.jsonArray, showLangSwitch)
-                                    .map { LayoutJsonUtils.createKeyDef(it, subModeLabel, ime?.subMode?.name ?: "") }
+                                    .map {
+                                        LayoutJsonUtils.createKeyDef(
+                                            key = it,
+                                            subModeLabel = subModeLabel,
+                                            schemaId = schemaId,
+                                            subModeName = ime?.subMode?.name ?: ""
+                                        )
+                                    }
                             }
                         }
                     }
@@ -452,29 +621,45 @@ class TextKeyboard(
                         ?: json[ime?.displayName]
 
                     if (imeLayoutElement != null) {
-                        // Check if this is a submode structure (JsonObject) or direct layout (JsonArray)
-                        val subModeLayoutElement = if (imeLayoutElement is JsonObject) {
-                            // Submode structure: try submode label, then "default", then empty string
-                            imeLayoutElement[subModeLabel]
-                                ?: imeLayoutElement["default"]
-                                ?: imeLayoutElement[""]
-                        } else {
-                            // Direct layout array, use as-is
-                            imeLayoutElement
-                        }
+                        val matchedSubModeKey = (imeLayoutElement as? JsonObject)
+                            ?.let { obj ->
+                                subModeCandidates(subModeLabel, schemaId, subModeName)
+                                    .firstOrNull { obj[it] != null }
+                            }
+                        val subModeLayoutElement = resolveSubModeLayoutElement(
+                            imeLayoutElement = imeLayoutElement,
+                            subModeLabel = subModeLabel,
+                            schemaId = schemaId,
+                            subModeName = subModeName
+                        )
 
                         val layoutArray = parseLayoutArray(subModeLayoutElement)
                         if (layoutArray != null) {
                             resolvedLayoutHeightPercentOverride =
                                 parseLayoutHeightPercentOverride(subModeLayoutElement)
                                     ?: parseLayoutHeightPercentOverride(imeLayoutElement)
+                            resolvedAuxBarConfig =
+                                parseAuxBarConfig(subModeLayoutElement)
+                                    ?: parseAuxBarConfig(imeLayoutElement)
+                            resolvedAuxBarKeys =
+                                parseAuxBarKeys(subModeLayoutElement)
+                                    .ifEmpty { parseAuxBarKeys(imeLayoutElement) }
                             // Use a cache key that includes submode and showLangSwitch for proper caching
                             // Include showLangSwitch in cache key so layout is re-created when setting changes
-                            val cacheKey = "$layoutKey:$subModeLabel:$showLangSwitch"
+                            val cacheSubMode = matchedSubModeKey ?: "default"
+                            val cacheKey = "$layoutKey:$cacheSubMode:$showLangSwitch:$displayTextContextCacheKey"
+                            cachedAuxBarConfigs[cacheKey] = resolvedAuxBarConfig
                             return cachedKeyDefLayouts.getOrPut(cacheKey) {
                                 layoutArray.map { rowElement ->
                                     LayoutJsonUtils.parseKeyJsonArray(rowElement.jsonArray, showLangSwitch)
-                                        .map { LayoutJsonUtils.createKeyDef(it, subModeLabel, ime?.subMode?.name ?: "") }
+                                        .map {
+                                            LayoutJsonUtils.createKeyDef(
+                                                key = it,
+                                                subModeLabel = subModeLabel,
+                                                schemaId = schemaId,
+                                                subModeName = subModeName
+                                            )
+                                        }
                                 }
                             }
                         }
@@ -483,9 +668,13 @@ class TextKeyboard(
                     // Fallback to global "default" layout
                     json["default"]?.let { layoutElement ->
                         resolvedLayoutHeightPercentOverride = parseLayoutHeightPercentOverride(layoutElement)
+                        resolvedAuxBarConfig = parseAuxBarConfig(layoutElement)
+                        resolvedAuxBarKeys = parseAuxBarKeys(layoutElement)
                         val layoutArray = parseLayoutArray(layoutElement)
                         if (layoutArray != null) {
-                            return cachedKeyDefLayouts.getOrPut("default:$showLangSwitch:$lastRawModified") {
+                            val cacheKey = "default:$showLangSwitch:$lastRawModified"
+                            cachedAuxBarConfigs[cacheKey] = resolvedAuxBarConfig
+                            return cachedKeyDefLayouts.getOrPut(cacheKey) {
                                 layoutArray.map { rowElement ->
                                     LayoutJsonUtils.parseKeyJsonArray(rowElement.jsonArray, showLangSwitch)
                                         .map { LayoutJsonUtils.createKeyDef(it) }
@@ -496,6 +685,8 @@ class TextKeyboard(
                 }
             }
             resolvedLayoutHeightPercentOverride = null
+            resolvedAuxBarConfig = null
+            resolvedAuxBarKeys = emptyList()
             return getDefaultLayout(showLangSwitch)
         }
 
@@ -554,39 +745,52 @@ class TextKeyboard(
         space = emptyList(),
         `return` = emptyList()
     )
+    private val specialIconTintCache = WeakHashMap<ImageView, ColorStateList>()
 
     data class SpecialKeyViews(
-        val caps: List<ImageKeyView>,
-        val backspace: List<ImageKeyView>,
-        val quickphrase: List<ImageKeyView>,
+        val caps: List<ImageView>,
+        val backspace: List<ImageView>,
+        val quickphrase: List<ImageView>,
         val space: List<TextKeyView>,
-        val `return`: List<ImageKeyView>
+        val `return`: List<ImageView>
     )
 
+    private fun iconViewOf(view: View): ImageView? = when (view) {
+        is ImageKeyView -> view.img
+        is ImageAltTextKeyView -> view.img
+        is ImageTextKeyView -> view.img
+        else -> null
+    }
+
     private fun findAllSpecialKeyViews(): SpecialKeyViews {
-        val caps = mutableListOf<ImageKeyView>()
-        val backspace = mutableListOf<ImageKeyView>()
-        val quickphrase = mutableListOf<ImageKeyView>()
+        val caps = mutableListOf<ImageView>()
+        val backspace = mutableListOf<ImageView>()
+        val quickphrase = mutableListOf<ImageView>()
         val space = mutableListOf<TextKeyView>()
-        val returnKeys = mutableListOf<ImageKeyView>()
+        val returnKeys = mutableListOf<ImageView>()
 
         allViews.forEach { view ->
             when (view.tag) {
-                R.id.button_caps -> (view as? ImageKeyView)?.let(caps::add)
-                R.id.button_backspace -> (view as? ImageKeyView)?.let(backspace::add)
-                R.id.button_quickphrase -> (view as? ImageKeyView)?.let(quickphrase::add)
+                R.id.button_caps -> iconViewOf(view)?.let(caps::add)
+                R.id.button_backspace -> iconViewOf(view)?.let(backspace::add)
+                R.id.button_quickphrase -> iconViewOf(view)?.let(quickphrase::add)
                 R.id.button_space -> (view as? TextKeyView)?.let(space::add)
-                R.id.button_return -> (view as? ImageKeyView)?.let(returnKeys::add)
+                R.id.button_return -> iconViewOf(view)?.let(returnKeys::add)
             }
         }
 
-        return SpecialKeyViews(
+        val specialViews = SpecialKeyViews(
             caps = caps,
             backspace = backspace,
             quickphrase = quickphrase,
             space = space,
             `return` = returnKeys
         )
+        (specialViews.caps + specialViews.backspace + specialViews.quickphrase + specialViews.`return`)
+            .forEach { iconView ->
+                iconView.imageTintList?.let { specialIconTintCache[iconView] = it }
+            }
+        return specialViews
     }
     
     private fun ensureSpecialKeyViewsInitialized() {
@@ -612,6 +816,10 @@ class TextKeyboard(
     private val keepLettersUppercase by AppPrefs.getInstance().keyboard.keepLettersUppercase
 
     init {
+        // BaseKeyboard has already built the initial layout. If the current IME was supplied
+        // before construction, remember its signature so onInputMethodUpdate does not rebuild
+        // the exact same custom layout immediately afterwards.
+        ime?.let { lastLayoutSignature = layoutSignature(it) }
     }
 
     private val textKeys: List<TextKeyView>
@@ -672,7 +880,7 @@ class TextKeyboard(
                         CapsState.Lock -> {
                             transformed = action.copy(
                                 act = action.act.uppercase(),
-                                states = KeyStates(KeyState.Virtual, KeyState.CapsLock)
+                                states = KeyStates(KeyState.Virtual, KeyState.Shift)
                             )
                         }
                     }
@@ -825,7 +1033,7 @@ class TextKeyboard(
 
     override fun onAttach() {
         ensureSpecialKeyViewsInitialized()
-        capsState = CapsState.None
+        capsState = if (getService()?.isVirtualShiftLockOn() == true) CapsState.Lock else CapsState.None
         updateCapsButtonIcon()
         updateAlphabetKeys()
     }
@@ -852,7 +1060,15 @@ class TextKeyboard(
 
     override fun onReturnDrawableUpdate(returnDrawable: Int) {
         specialKeyViews.`return`.forEach { returnKey ->
-            returnKey.img.imageResource = returnDrawable
+            returnKey.imageResource = returnDrawable
+        }
+    }
+
+    override fun onReturnDrawableOverride(drawable: Drawable?) {
+        if (drawable != null) {
+            specialKeyViews.`return`.forEach { returnKey ->
+                returnKey.setImageDrawable(drawable)
+            }
         }
     }
 
@@ -863,7 +1079,7 @@ class TextKeyboard(
 
     private fun updateSpaceLabel(ime: InputMethodEntry?) {
         if (ime == null) return
-        val subModeText = ime.subMode.run { label.ifEmpty { name.ifEmpty { "" } } }
+        val subModeText = ime.subMode.run { name.ifEmpty { label.ifEmpty { "" } } }
         val newText = when (spaceKeyLabelMode.getValue()) {
             SpaceKeyLabelMode.Default -> {
                 buildString {
@@ -896,11 +1112,8 @@ class TextKeyboard(
         }
         // Re-find special key views after layout reload (or ensure initialized on first call)
         ensureSpecialKeyViewsInitialized()
-        updateAlphabetKeys()
         updateSpaceLabel(ime)
-        if (capsState != CapsState.None) {
-            switchCapsState()
-        }
+        refreshCapsPresentation()
     }
 
     override fun onStyleRefreshFinished() {
@@ -921,6 +1134,7 @@ class TextKeyboard(
         super.onCompositionStateChanged(composing)
         ensureSpecialKeyViewsInitialized()
         // Compose-state switches may recreate key views; re-apply caps presentation immediately.
+        updateCapsButtonIcon()
         updateAlphabetKeys()
     }
 
@@ -969,7 +1183,7 @@ class TextKeyboard(
         val oldLocked = oldCapsState == CapsState.Lock
         val newLocked = capsState == CapsState.Lock
         if (oldLocked != newLocked) {
-            getService()?.setVirtualCapsLockState(newLocked)
+            getService()?.setVirtualShiftLockState(newLocked)
         }
         refreshCapsPresentation()
     }
@@ -987,12 +1201,33 @@ class TextKeyboard(
 
     private fun updateCapsButtonIcon() {
         val displayLock = isDisplayCapsOn()
+        val slots = when (capsState) {
+            CapsState.None -> if (displayLock) listOf("keys.capslock.lock") else listOf("keys.capslock.none")
+            CapsState.Once -> listOf("keys.capslock.once")
+            CapsState.Lock -> listOf("keys.capslock.lock")
+        }
+        val iconInfo = slots.firstNotNullOfOrNull { IconThemeManager.resolveIconDrawableInfo(it) }
+        val fallbackRes = when (capsState) {
+            CapsState.None -> if (displayLock) R.drawable.ic_capslock_lock else R.drawable.ic_capslock_none
+            CapsState.Once -> R.drawable.ic_capslock_once
+            CapsState.Lock -> R.drawable.ic_capslock_lock
+        }
         specialKeyViews.caps.forEach { cap ->
-            cap.img.apply {
-                imageResource = when (capsState) {
-                    CapsState.None -> if (displayLock) R.drawable.ic_capslock_lock else R.drawable.ic_capslock_none
-                    CapsState.Once -> R.drawable.ic_capslock_once
-                    CapsState.Lock -> R.drawable.ic_capslock_lock
+            cap.apply {
+                imageTintList?.let { specialIconTintCache[this] = it }
+                val themedTint = specialIconTintCache[this]
+                    ?: ColorStateList.valueOf(theme.altKeyTextColor)
+                if (iconInfo != null) {
+                    setImageDrawable(iconInfo.drawable)
+                    if (iconInfo.tintWithTheme) {
+                        imageTintList = themedTint
+                    } else {
+                        imageTintList = null
+                        drawable?.setTintList(null)
+                    }
+                } else {
+                    imageResource = fallbackRes
+                    imageTintList = themedTint
                 }
             }
         }
@@ -1005,10 +1240,13 @@ class TextKeyboard(
             if (keyDef is KeyDef.Appearance.AltText) {
                 val renderedText = it.mainText.text.toString()
                 val sourceFromDef = renderedText.isEmpty() || renderedText == keyDef.displayText
+                    || renderedText.equals(keyDef.character, ignoreCase = true)
                 val displayText = if (sourceFromDef) keyDef.displayText else renderedText
                 val character = keyDef.character
-                val displayIsSingleLetter = displayText.length == 1 && displayText[0].isLetter()
-                val characterIsSingleLetter = sourceFromDef && character.length == 1 && character[0].isLetter()
+                val displayIsSingleLetter = displayText.length == 1
+                    && (displayText[0] in 'A'..'Z' || displayText[0] in 'a'..'z')
+                val characterIsSingleLetter = sourceFromDef && character.length == 1
+                    && (character[0] in 'A'..'Z' || character[0] in 'a'..'z')
 
                 it.mainText.text = when {
                     keepLettersUppercase && displayIsSingleLetter -> displayText.uppercase()
@@ -1026,7 +1264,7 @@ class TextKeyboard(
                 } else {
                     renderedText
                 }
-                if (str.length == 1 && str[0].isLetter()) {
+                if (str.length == 1 && (str[0] in 'A'..'Z' || str[0] in 'a'..'z')) {
                      it.mainText.text = if (keepLettersUppercase) {
                         str.uppercase()
                     } else {

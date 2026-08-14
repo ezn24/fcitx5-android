@@ -25,6 +25,7 @@ import android.graphics.RenderNode
 import android.graphics.Shader
 import androidx.core.content.ContextCompat
 import android.graphics.Outline
+import android.graphics.Point
 import android.os.Build
 import android.os.SystemClock
 import android.view.View
@@ -50,6 +51,8 @@ import org.fcitx.fcitx5.android.data.prefs.SplitKeyboardStateManager
 import org.fcitx.fcitx5.android.data.prefs.ManagedPreferenceProvider
 import org.fcitx.fcitx5.android.data.theme.Theme
 import org.fcitx.fcitx5.android.data.theme.ThemeManager
+import com.google.android.flexbox.FlexboxLayout
+import com.google.android.flexbox.FlexWrap
 import org.fcitx.fcitx5.android.input.bar.KawaiiBarComponent
 import org.fcitx.fcitx5.android.utils.DarkenColorFilter
 import org.fcitx.fcitx5.android.input.config.ConfigChangeListener
@@ -61,23 +64,31 @@ import org.fcitx.fcitx5.android.input.broadcast.PunctuationComponent
 import org.fcitx.fcitx5.android.input.broadcast.ReturnKeyDrawableComponent
 import org.fcitx.fcitx5.android.input.action.ButtonAction
 import org.fcitx.fcitx5.android.input.candidates.horizontal.HorizontalCandidateComponent
+import org.fcitx.fcitx5.android.input.keyboard.KeyActionListener
 import org.fcitx.fcitx5.android.input.keyboard.CommonKeyActionListener
 import org.fcitx.fcitx5.android.input.keyboard.BaseKeyboard
 import org.fcitx.fcitx5.android.input.keyboard.KeyView
 import org.fcitx.fcitx5.android.input.keyboard.KeyAction
+import org.fcitx.fcitx5.android.input.keyboard.KeyboardHeightPercentBase.DisplayMetrics
+import org.fcitx.fcitx5.android.input.keyboard.KeyboardHeightPercentBase.RealSize
 import org.fcitx.fcitx5.android.input.keyboard.KeyboardWindow
 import org.fcitx.fcitx5.android.input.picker.PickerWindow
 import org.fcitx.fcitx5.android.input.picker.emojiPicker
 import org.fcitx.fcitx5.android.input.picker.emoticonPicker
 import org.fcitx.fcitx5.android.input.picker.symbolPicker
 import org.fcitx.fcitx5.android.input.popup.PopupComponent
+import org.fcitx.fcitx5.android.input.font.FontProviders
 import org.fcitx.fcitx5.android.input.preedit.PreeditComponent
 import org.fcitx.fcitx5.android.input.status.ButtonsAdjustingWindow
 import org.fcitx.fcitx5.android.input.status.StatusAreaWindow
 import android.view.MotionEvent
+import androidx.core.widget.NestedScrollView
+import android.util.TypedValue
 import androidx.constraintlayout.widget.ConstraintLayout
 import org.fcitx.fcitx5.android.input.wm.InputWindowManager
 import org.fcitx.fcitx5.android.utils.unset
+import org.fcitx.fcitx5.android.input.candidates.floating.FloatingCandidatesMode
+import org.fcitx.fcitx5.android.input.candidates.floating.FloatingCandidatesVirtualKeyboardPosition
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -86,6 +97,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import timber.log.Timber
+import org.fcitx.fcitx5.android.utils.windowManager
 import org.mechdancer.dependency.DynamicScope
 import org.mechdancer.dependency.manager.wrapToUniqueComponent
 import org.mechdancer.dependency.plusAssign
@@ -923,7 +935,6 @@ class InputView(
                     }
                     MotionEvent.ACTION_MOVE -> {
                         val delta = (lastAdjustingTouchY - event.rawY).toInt()
-                        // Scale: 100px drag = 20dp padding change
                         val deltaPadding = (delta * 0.2f).toInt()
                         val newPadding = (adjustingResizeStartBottomPadding + deltaPadding).coerceIn(0, 100)
                         val currentPadding = resolveKeyboardBottomPadding()
@@ -933,14 +944,18 @@ class InputView(
                             } else {
                                 keyboardPrefs.keyboardBottomPadding.setValue(newPadding)
                             }
-                            updateKeyboardSize()
-                            keyboardView.post {
-                                updateAdjustingHandlePosition()
+                            val now = System.currentTimeMillis()
+                            if (now - adjustingLastUpdateTime >= 50) {
+                                adjustingLastUpdateTime = now
+                                updateKeyboardSize()
+                                keyboardView.post { updateAdjustingHandlePosition() }
                             }
                         }
                         true
                     }
                     MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                        updateKeyboardSize()
+                        keyboardView.post { updateAdjustingHandlePosition() }
                         v.parent?.requestDisallowInterceptTouchEvent(false)
                         v.isPressed = false
                         true
@@ -1016,22 +1031,18 @@ class InputView(
                 }
                 MotionEvent.ACTION_MOVE -> {
                     val delta = event.rawY - lastAdjustingTouchY
-                    // Calculate percent change based on touch movement
-                    // Moving up (negative delta) should increase height
-                    // Moving down (positive delta) should decrease height
                     val screenHeight = resources.displayMetrics.heightPixels.toFloat()
-                    // Scale factor: 100px drag = 10% keyboard height change (more responsive)
                     val deltaPercent = (delta / screenHeight) * 100f
-                    // Match the preference range: 10% to 90%
                     val newPercent = (adjustingResizeStartHeight - deltaPercent).toInt()
                         .coerceIn(10, 90)
                     val currentPercent = resolveAdjustingHeightPercent()
-                    // Only update if value changed significantly
                     if (kotlin.math.abs(newPercent - currentPercent) >= 1) {
                         adjustingPendingHeightPercent = newPercent
-                        updateKeyboardSize()
-                        keyboardView.post {
-                            updateAdjustingHandlePosition()
+                        val now = System.currentTimeMillis()
+                        if (now - adjustingLastUpdateTime >= 50) {
+                            adjustingLastUpdateTime = now
+                            updateKeyboardSize()
+                            keyboardView.post { updateAdjustingHandlePosition() }
                         }
                     }
                     true
@@ -1039,6 +1050,8 @@ class InputView(
                 MotionEvent.ACTION_UP -> {
                     adjustingPendingHeightPercent?.let { applyAdjustedHeightPercent(it) }
                     adjustingPendingHeightPercent = null
+                    updateKeyboardSize()
+                    keyboardView.post { updateAdjustingHandlePosition() }
                     v.parent?.requestDisallowInterceptTouchEvent(false)
                     v.isPressed = false
                     true
@@ -1069,7 +1082,6 @@ class InputView(
                 }
                 MotionEvent.ACTION_MOVE -> {
                     val delta = (event.rawX - lastAdjustingTouchX).toInt()
-                    // Scale: 100px drag = 20dp padding change
                     val deltaPadding = (delta * 0.2f).toInt()
                     val newPadding = (adjustingResizeStartSidePadding + deltaPadding)
                         .coerceIn(0, maxKeyboardSidePaddingInAdjustingMode())
@@ -1080,14 +1092,18 @@ class InputView(
                         } else {
                             keyboardPrefs.keyboardSidePadding.setValue(newPadding)
                         }
-                        updateKeyboardSize()
-                        keyboardView.post {
-                            updateAdjustingHandlePosition()
+                        val now = System.currentTimeMillis()
+                        if (now - adjustingLastUpdateTime >= 50) {
+                            adjustingLastUpdateTime = now
+                            updateKeyboardSize()
+                            keyboardView.post { updateAdjustingHandlePosition() }
                         }
                     }
                     true
                 }
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    updateKeyboardSize()
+                    keyboardView.post { updateAdjustingHandlePosition() }
                     v.parent?.requestDisallowInterceptTouchEvent(false)
                     v.isPressed = false
                     true
@@ -1111,7 +1127,6 @@ class InputView(
                 }
                 MotionEvent.ACTION_MOVE -> {
                     val delta = (lastAdjustingTouchX - event.rawX).toInt()
-                    // Scale: 100px drag = 20dp padding change
                     val deltaPadding = (delta * 0.2f).toInt()
                     val newPadding = (adjustingResizeStartSidePadding + deltaPadding)
                         .coerceIn(0, maxKeyboardSidePaddingInAdjustingMode())
@@ -1122,14 +1137,18 @@ class InputView(
                         } else {
                             keyboardPrefs.keyboardSidePadding.setValue(newPadding)
                         }
-                        updateKeyboardSize()
-                        keyboardView.post {
-                            updateAdjustingHandlePosition()
+                        val now = System.currentTimeMillis()
+                        if (now - adjustingLastUpdateTime >= 50) {
+                            adjustingLastUpdateTime = now
+                            updateKeyboardSize()
+                            keyboardView.post { updateAdjustingHandlePosition() }
                         }
                     }
                     true
                 }
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    updateKeyboardSize()
+                    keyboardView.post { updateAdjustingHandlePosition() }
                     v.parent?.requestDisallowInterceptTouchEvent(false)
                     v.isPressed = false
                     true
@@ -1221,6 +1240,7 @@ class InputView(
     private var adjustingResizeStartHeight = 0
     private var adjustingResizeStartSidePadding = 0
     private var adjustingResizeStartBottomPadding = 0
+    private var adjustingLastUpdateTime = 0L
     private var lastAdjustingTouchX = 0f
     private var lastAdjustingTouchY = 0f
     private var adjustingStartKeyboardTop = 0
@@ -1452,6 +1472,18 @@ class InputView(
     private val returnKeyDrawable = ReturnKeyDrawableComponent()
     private val preeditEmptyState = PreeditEmptyStateComponent()
     private val preedit = PreeditComponent()
+    private val auxBarContainer = FlexboxLayout(context).apply {
+        flexWrap = FlexWrap.WRAP
+        alpha = 0.8f
+    }
+    private val auxBarScrollView = NestedScrollView(context).apply {
+        visibility = View.GONE
+        clipChildren = true
+        clipToPadding = true
+        isFillViewport = false
+        addView(auxBarContainer)
+        (auxBarContainer.layoutParams as android.widget.FrameLayout.LayoutParams).gravity = Gravity.BOTTOM
+    }
     private val commonKeyActionListener = CommonKeyActionListener()
     private val windowManager = InputWindowManager()
     private val kawaiiBar = KawaiiBarComponent()
@@ -1502,6 +1534,9 @@ class InputView(
     private val splitKeyboardUseLandscapeLayout = keyboardPrefs.splitKeyboardUseLandscapeLayout
     private val textKeyboardLayoutProfile = keyboardPrefs.textKeyboardLayoutProfile
 
+    private val advancedPrefs = AppPrefs.getInstance().advanced
+    private val keyboardHeightPercentBase = advancedPrefs.keyboardHeightPercentBase
+
     private val keyboardSizePrefs = listOf(
         keyboardHeightPercent,
         keyboardHeightPercentLandscape,
@@ -1514,6 +1549,7 @@ class InputView(
         keyboardPrefs.splitKeyboardThreshold,
         keyboardPrefs.splitKeyboardGapPercent,
         splitKeyboardUseLandscapeLayout,
+        keyboardHeightPercentBase,
     )
 
     var isFloating = false
@@ -1610,6 +1646,8 @@ class InputView(
     // Whether layout-related preferences should be treated as landscape.
     // Enabled when device is landscape OR when "use landscape layout when split" is enabled and split keyboard is active.
     // Prefer using the actual keyboard view width when available to decide if split is active.
+    private var layoutLandscapeReevaluationPosted = false
+
     private val isLayoutLandscape: Boolean
         get() {
             if (isLandscapeOrientation) return true
@@ -1636,14 +1674,23 @@ class InputView(
                 manager.shouldUseSplitKeyboard()
             }
 
-            // If we couldn't get real width, schedule a re-evaluation after layout so that
-            // once keyboardView has a width we refresh dependent UI.
-            if (realWidthPx <= 0) {
+            // This property is read several times while InputView is being constructed. Posting
+            // from every read used to queue a full refresh of every keyboard for each access,
+            // causing a large burst of main-thread work after the first layout. Coalesce the
+            // width-dependent recheck and only resize when the fallback decision was wrong.
+            if (realWidthPx <= 0 && !layoutLandscapeReevaluationPosted) {
+                layoutLandscapeReevaluationPosted = true
+                val fallbackShouldSplit = shouldSplit
                 keyboardView.post {
-                    // Refresh keyboard layouts if split state might differ
-                    (windowManager.getEssentialWindow(KeyboardWindow) as? KeyboardWindow)?.refreshAllKeyboards()
-                    updateKeyboardSize()
-                    requestLayout()
+                    layoutLandscapeReevaluationPosted = false
+                    val measuredWidth = keyboardView.width.takeIf { it > 0 }
+                        ?: windowManager.view.width.takeIf { it > 0 }
+                    if (measuredWidth != null &&
+                        manager.shouldUseSplitKeyboard(measuredWidth) != fallbackShouldSplit
+                    ) {
+                        updateKeyboardSize()
+                        requestLayout()
+                    }
                 }
             }
 
@@ -2155,6 +2202,7 @@ class InputView(
         requestLayout()
         // Trigger insets update
         service.window.window?.decorView?.requestLayout()
+        updateAuxBarPosition()
     }
 
     private fun restoreFloatingAndOneHandState() {
@@ -2190,6 +2238,7 @@ class InputView(
             isFloating = false
             floatingModeEnabledPref = false
             kawaiiBar.setFloatingState(false)
+            updateAuxBarPosition()
         }
         isOneHanded = !isOneHanded
         oneHandModeEnabledPref = isOneHanded
@@ -2333,10 +2382,26 @@ class InputView(
 
         keyboardView.getHitRect(rect)
 
+        var preeditRectForRegion: Rect? = null
         if (preedit.ui.root.visibility == View.VISIBLE) {
-             val preeditRect = Rect()
-             preedit.ui.root.getHitRect(preeditRect)
-             rect.union(preeditRect)
+            val preeditRect = Rect()
+            preedit.ui.root.getHitRect(preeditRect)
+            val textWidth = preedit.ui.actualContentWidth
+            if (textWidth > 0 && textWidth < preeditRect.width()) {
+                preeditRect.right = preeditRect.left + textWidth
+            }
+            preeditRectForRegion = preeditRect
+        }
+
+        var auxBarRectForRegion: Rect? = null
+        if (auxBarScrollView.visibility == View.VISIBLE) {
+            val auxRect = Rect()
+            auxBarScrollView.getHitRect(auxRect)
+            val auxWidth = auxBarContentWidth()
+            if (auxWidth > 0 && auxWidth < auxRect.width()) {
+                auxRect.right = auxRect.left + auxWidth
+            }
+            auxBarRectForRegion = auxRect
         }
 
         if (floatingRightHandle.visibility == View.VISIBLE) {
@@ -2398,6 +2463,24 @@ class InputView(
         // No extra inset needed now as handles provide padding and coverage
 
         outRegion.set(rect)
+        if (preeditRectForRegion != null) {
+            outRegion.op(preeditRectForRegion, Region.Op.UNION)
+        }
+        if (auxBarRectForRegion != null) {
+            outRegion.op(auxBarRectForRegion, Region.Op.UNION)
+        }
+    }
+
+    private fun auxBarContentWidth(): Int {
+        if (auxBarScrollView.visibility != View.VISIBLE || auxBarContainer.childCount == 0) return 0
+        var maxRight = 0
+        for (i in 0 until auxBarContainer.childCount) {
+            val child = auxBarContainer.getChildAt(i)
+            if (child.visibility == View.VISIBLE && child.right > maxRight) {
+                maxRight = child.right
+            }
+        }
+        return maxRight
     }
 
     fun getDockedKeyboardRegion(outRegion: Region) {
@@ -2409,6 +2492,36 @@ class InputView(
             keyboardLocation[0] + keyboardView.width,
             keyboardLocation[1] + keyboardView.height
         )
+
+        var preeditRectForRegion: Rect? = null
+        if (preedit.ui.root.visibility == View.VISIBLE) {
+            val preeditLocation = IntArray(2)
+            preedit.ui.root.getLocationInWindow(preeditLocation)
+            val textWidth = preedit.ui.actualContentWidth
+            if (textWidth > 0) {
+                preeditRectForRegion = Rect(
+                    preeditLocation[0],
+                    preeditLocation[1],
+                    preeditLocation[0] + textWidth,
+                    preeditLocation[1] + preedit.ui.root.height
+                )
+            }
+        }
+
+        var auxBarRectForRegion: Rect? = null
+        if (auxBarScrollView.visibility == View.VISIBLE) {
+            val auxLocation = IntArray(2)
+            auxBarScrollView.getLocationInWindow(auxLocation)
+            val auxWidth = auxBarContentWidth()
+            if (auxWidth > 0) {
+                auxBarRectForRegion = Rect(
+                    auxLocation[0],
+                    auxLocation[1],
+                    auxLocation[0] + auxWidth,
+                    auxLocation[1] + auxBarScrollView.height
+                )
+            }
+        }
 
         if (oneHandHandle.visibility == View.VISIBLE) {
             val handleLocation = IntArray(2)
@@ -2497,6 +2610,12 @@ class InputView(
         }
 
         outRegion.set(rect)
+        if (preeditRectForRegion != null) {
+            outRegion.op(preeditRectForRegion, Region.Op.UNION)
+        }
+        if (auxBarRectForRegion != null) {
+            outRegion.op(auxBarRectForRegion, Region.Op.UNION)
+        }
     }
 
     private fun updateFloatingState() {
@@ -2570,8 +2689,20 @@ class InputView(
     private val keyboardHeightPx: Int
         get() {
             companionKeyboardHeightPxOverride()?.let { return it }
-            val effectivePercent = resolveEffectiveKeyboardHeightPercent()
-            val baseHeight = (resources.displayMetrics.heightPixels * effectivePercent / 100f).toInt()
+            val baseType = keyboardHeightPercentBase.getValue()
+            val base = when (baseType) {
+                DisplayMetrics -> resources.displayMetrics.heightPixels
+                RealSize -> Point().also {
+                    @Suppress("DEPRECATION")
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                        context.display
+                    } else {
+                        context.windowManager.defaultDisplay
+                    }.getRealSize(it)
+                }.y
+            }
+            val percent = resolveEffectiveKeyboardHeightPercent()
+            val baseHeight = (base * percent / 100f).toInt()
             if (isEffectiveFloating) {
                 return (baseHeight * 0.8).toInt()
             }
@@ -2785,6 +2916,13 @@ class InputView(
 
         updateKeyboardSize()
 
+        if (preedit.ui.root.id == View.NO_ID) {
+            preedit.ui.root.id = View.generateViewId()
+        }
+        add(auxBarScrollView, lParams(matchParent, wrapContent) {
+            bottomToTop = preedit.ui.root.id
+            bottomMargin = dp(2)
+        })
         add(preedit.ui.root, lParams(matchParent, wrapContent) {
             bottomToTop = keyboardView.id
             centerHorizontally()
@@ -2857,6 +2995,7 @@ class InputView(
             endToEnd = keyboardView.id
         })
         keyboardPrefs.registerOnChangeListener(onKeyboardSizeChangeListener)
+        advancedPrefs.registerOnChangeListener(onKeyboardSizeChangeListener)
         candidatesPrefs.registerOnChangeListener(onCandidatePreferenceChangeListener)
         restoreFloatingAndOneHandState()
         updateFloatingState()
@@ -3320,6 +3459,7 @@ class InputView(
 
     override fun onDetachedFromWindow() {
         windowManager.onWindowChanged = null
+        advancedPrefs.unregisterOnChangeListener(onKeyboardSizeChangeListener)
         keyboardPrefs.unregisterOnChangeListener(onKeyboardSizeChangeListener)
         candidatesPrefs.unregisterOnChangeListener(onCandidatePreferenceChangeListener)
         ConfigProviders.removeButtonsLayoutListener(onButtonsLayoutChangeListener)
@@ -3331,4 +3471,210 @@ class InputView(
         super.onDetachedFromWindow()
     }
 
+    fun updateAuxBar(actions: List<org.fcitx.fcitx5.android.core.AuxBarAction>, listener: KeyActionListener) {
+        // When floating keyboard or candidate window is active, disable external aux bar.
+        // Tabs are only displayed inside the keyboard when left/right/top/bottom position is configured.
+        if (isFloating || service.candidatesView?.visibility == View.VISIBLE) {
+            auxBarContainer.removeAllViews()
+            auxBarScrollView.visibility = View.GONE
+            return
+        }
+        val container = auxBarContainer
+        container.removeAllViews()
+        if (actions.isEmpty()) {
+            auxBarScrollView.visibility = View.GONE
+            return
+        }
+        val theme = ThemeManager.activeTheme
+        val prefs = ThemeManager.prefs
+        val keyBorder = prefs.keyBorder.getValue()
+        val bkgColor = if (!keyBorder && theme is Theme.Builtin) theme.barColor else theme.backgroundColor
+        val radius = dp(prefs.keyRadius.getValue().toFloat())
+        val padH = dp(8)
+        val padV = dp(0)
+        val gap = dp(4)
+        val textColor = theme.keyTextColor
+        for (action in actions) {
+            if (action.isSeparator) continue
+            val btn = TextView(context).apply {
+                text = action.text
+                gravity = Gravity.CENTER
+                setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP,
+                    FontProviders.getFontSize("preedit_font", 16f))
+                typeface = FontProviders.resolveTypeface("preedit_font", typeface)
+                setTextColor(textColor)
+                setPadding(padH, padV, padH, padV)
+                isSingleLine = true
+                isClickable = true
+                isFocusable = true
+                background = GradientDrawable().apply {
+                    setColor(bkgColor)
+                    cornerRadius = radius
+                }
+                setOnClickListener {
+                    listener.onKeyAction(
+                        KeyAction.AuxBarTrigger(action.id),
+                        KeyActionListener.Source.Keyboard
+                    )
+                }
+            }
+            val lp = FlexboxLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply {
+                topMargin = gap / 2
+                bottomMargin = gap / 2
+                marginEnd = gap
+            }
+            container.addView(btn, lp)
+        }
+        auxBarScrollView.visibility = View.VISIBLE
+        container.requestLayout()
+        updateAuxBarPosition()
+    }
+
+    fun clearAuxBar() {
+        auxBarContainer.removeAllViews()
+        auxBarScrollView.visibility = View.GONE
+    }
+
+    private val auxBarSingleRowMinHeight: Int by lazy {
+        val tv = TextView(context).apply {
+            text = "Mj"
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, FontProviders.getFontSize("preedit_font", 16f))
+            setPadding(0, dp(0), 0, dp(0))
+            measure(
+                View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED),
+                View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
+            )
+        }
+        tv.measuredHeight + dp(4) // topMargin + bottomMargin gap
+    }
+
+    private val statusBarHeight: Int by lazy {
+        val resourceId = context.resources.getIdentifier("status_bar_height", "dimen", "android")
+        if (resourceId > 0) context.resources.getDimensionPixelSize(resourceId) else 0
+    }
+
+    fun updateAuxBarPosition() {
+        val scrollView = auxBarScrollView
+        if (scrollView.visibility != View.VISIBLE || auxBarContainer.childCount == 0) return
+        // When floating keyboard or candidate window is active, hide external aux bar.
+        // Tabs are only displayed inside the keyboard when left/right/top/bottom position is configured.
+        if (isFloating || service.candidatesView?.visibility == View.VISIBLE) {
+            scrollView.visibility = View.GONE
+            return
+        }
+        scrollView.post {
+            val useFloatingAlways = AppPrefs.getInstance().candidates.mode.getValue() == FloatingCandidatesMode.Always
+            if (useFloatingAlways) {
+                val cv = service.candidatesView
+                if (cv != null && cv.visibility == View.VISIBLE) {
+                    positionAuxBarForCandidates(cv, scrollView)
+                    return@post
+                }
+            }
+            positionAuxBarDefault(scrollView)
+        }
+    }
+
+    private fun positionAuxBarForCandidates(cv: View, scrollView: NestedScrollView) {
+        val position = AppPrefs.getInstance().candidates.virtualKeyboardPosition.getValue()
+        val cvLoc = IntArray(2)
+        cv.getLocationInWindow(cvLoc)
+        val inputLoc = IntArray(2)
+        getLocationInWindow(inputLoc)
+        val keyboardLoc = IntArray(2)
+        keyboardView.getLocationInWindow(keyboardLoc)
+
+        when (position) {
+            FloatingCandidatesVirtualKeyboardPosition.TopLeft,
+            FloatingCandidatesVirtualKeyboardPosition.TopRight -> {
+                val cvBottomInInput = cvLoc[1] + cv.height - inputLoc[1]
+                val keyboardTopInInput = keyboardLoc[1] - inputLoc[1]
+                val availableHeight = keyboardTopInInput - cvBottomInInput
+                if (availableHeight < auxBarSingleRowMinHeight) {
+                    scrollView.visibility = View.GONE
+                } else {
+                    scrollView.visibility = View.VISIBLE
+                    scrollView.translationY = 0f
+                    (scrollView.layoutParams as ConstraintLayout.LayoutParams).apply {
+                        height = 0
+                        matchConstraintDefaultHeight = ConstraintLayout.LayoutParams.MATCH_CONSTRAINT_WRAP
+                        matchConstraintMaxHeight = availableHeight
+                        bottomToTop = keyboardView.id
+                        topToTop = ConstraintLayout.LayoutParams.UNSET
+                        topToBottom = ConstraintLayout.LayoutParams.UNSET
+                    }
+                    scrollView.requestLayout()
+                }
+            }
+            FloatingCandidatesVirtualKeyboardPosition.BottomLeft,
+            FloatingCandidatesVirtualKeyboardPosition.BottomRight -> {
+                val cvTopInInput = cvLoc[1] - inputLoc[1]
+                val availableHeight = cvTopInInput.coerceAtLeast(0)
+                if (availableHeight < auxBarSingleRowMinHeight) {
+                    scrollView.visibility = View.GONE
+                } else {
+                    scrollView.visibility = View.VISIBLE
+                    (scrollView.layoutParams as ConstraintLayout.LayoutParams).apply {
+                        height = 0
+                        matchConstraintDefaultHeight = ConstraintLayout.LayoutParams.MATCH_CONSTRAINT_WRAP
+                        matchConstraintMaxHeight = availableHeight
+                        bottomToTop = ConstraintLayout.LayoutParams.UNSET
+                        topToTop = ConstraintLayout.LayoutParams.UNSET
+                        topToBottom = ConstraintLayout.LayoutParams.UNSET
+                    }
+                    scrollView.requestLayout()
+                    scrollView.post {
+                        scrollView.translationY = (cvTopInInput - scrollView.height).toFloat()
+                    }
+                }
+            }
+        }
+    }
+
+    private fun positionAuxBarDefault(scrollView: NestedScrollView) {
+        scrollView.translationY = 0f
+        // Measure content height upfront and decide the layout mode in a single
+        // layout pass, avoiding flicker from two-pass (default → detect → constrained).
+        if (statusBarHeight > 0 && auxBarContainer.childCount > 0 && scrollView.width > 0) {
+            auxBarContainer.measure(
+                View.MeasureSpec.makeMeasureSpec(scrollView.width, View.MeasureSpec.AT_MOST),
+                View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
+            )
+            val preeditLoc = IntArray(2)
+            preedit.ui.root.getLocationInWindow(preeditLoc)
+            val availableHeight = preeditLoc[1] - dp(2) - statusBarHeight
+            if (auxBarContainer.measuredHeight > availableHeight && availableHeight > 0) {
+                // Dual-constraint mode: top anchored to status bar bottom,
+                // bottom anchored to preedit top, height fills available space.
+                (scrollView.layoutParams as ConstraintLayout.LayoutParams).apply {
+                    height = 0
+                    matchConstraintDefaultHeight = ConstraintLayout.LayoutParams.MATCH_CONSTRAINT_WRAP
+                    matchConstraintMaxHeight = 0
+                    topToTop = ConstraintLayout.LayoutParams.PARENT_ID
+                    topMargin = statusBarHeight
+                    bottomToTop = preedit.ui.root.id
+                    bottomMargin = dp(2)
+                    topToBottom = ConstraintLayout.LayoutParams.UNSET
+                }
+                (auxBarContainer.layoutParams as android.widget.FrameLayout.LayoutParams).gravity = Gravity.TOP
+                scrollView.requestLayout()
+                return
+            }
+        }
+        // Default mode: bottom anchored to preedit, wrap content height.
+        (scrollView.layoutParams as ConstraintLayout.LayoutParams).apply {
+            height = ConstraintLayout.LayoutParams.WRAP_CONTENT
+            bottomToTop = preedit.ui.root.id
+            bottomMargin = dp(2)
+            topToTop = ConstraintLayout.LayoutParams.UNSET
+            topToBottom = ConstraintLayout.LayoutParams.UNSET
+            matchConstraintDefaultHeight = 0
+            matchConstraintMaxHeight = 0
+        }
+        (auxBarContainer.layoutParams as android.widget.FrameLayout.LayoutParams).gravity = Gravity.BOTTOM
+        scrollView.requestLayout()
+    }
 }

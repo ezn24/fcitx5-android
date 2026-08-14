@@ -8,6 +8,7 @@ import android.app.AlertDialog
 import android.os.Bundle
 import android.view.View
 import android.view.inputmethod.EditorInfo
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
@@ -18,6 +19,8 @@ import org.fcitx.fcitx5.android.daemon.FcitxDaemon
 import org.fcitx.fcitx5.android.data.keyboard.EnglishWordManager
 import org.fcitx.fcitx5.android.ui.common.BaseDynamicListUi
 import org.fcitx.fcitx5.android.ui.common.OnItemChangedListener
+import org.fcitx.fcitx5.android.ui.main.EditDeleteMenuProvider
+import org.fcitx.fcitx5.android.ui.main.MainViewModel.ButtonMode
 import org.fcitx.fcitx5.android.utils.NaiveDustman
 import org.fcitx.fcitx5.android.utils.materialTextInput
 import org.fcitx.fcitx5.android.utils.onPositiveButtonClick
@@ -88,9 +91,19 @@ class EnglishWordListFragment : ProgressFragment(), OnItemChangedListener<String
         ui.addTouchCallback()
         ui.setViewModel(viewModel)
         resetDustman()
-        viewModel.enableToolbarEditButton(initialWords.isNotEmpty()) {
-            ui.enterMultiSelect(requireActivity().onBackPressedDispatcher)
-        }
+        viewModel.toolbarButton.value =
+            if (ui.entries.isNotEmpty()) ButtonMode.EDIT else ButtonMode.NONE
+        requireActivity().addMenuProvider(
+            EditDeleteMenuProvider(
+                buttonMode = viewModel.toolbarButton,
+                editButtonAction = { ui.enterMultiSelect(requireActivity().onBackPressedDispatcher) },
+                deleteButtonAction = { ui.deleteSelected(); ui.exitMultiSelect() },
+                menuHost = requireActivity(),
+                lifecycleOwner = viewLifecycleOwner,
+            ),
+            viewLifecycleOwner,
+            Lifecycle.State.STARTED
+        )
         return ui.root
     }
 
@@ -130,11 +143,6 @@ class EnglishWordListFragment : ProgressFragment(), OnItemChangedListener<String
     override fun onStart() {
         super.onStart()
         viewModel.setToolbarTitle(getString(R.string.english_word_list))
-        if (isInitialized) {
-            viewModel.enableToolbarEditButton(ui.entries.isNotEmpty()) {
-                ui.enterMultiSelect(requireActivity().onBackPressedDispatcher)
-            }
-        }
     }
 
     override fun onStop() {

@@ -98,6 +98,8 @@ class CandidatesView(
      */
     private var isVirtualKeyboardVisible = true
 
+    var onPositionChanged: (() -> Unit)? = null
+
     private var shouldUpdatePosition = false
 
     /**
@@ -171,11 +173,15 @@ class CandidatesView(
         preeditUi.update(inputPanel)
         preeditUi.root.visibility = if (preeditUi.visible) VISIBLE else GONE
         candidatesUi.update(paged, orientation)
+        val wasVisible = visibility == VISIBLE
         if (evaluateVisibility()) {
             visibility = VISIBLE
         } else {
             // RecyclerView won't update its items when ancestor view is GONE
             visibility = INVISIBLE
+        }
+        if (wasVisible != (visibility == VISIBLE)) {
+            onPositionChanged?.invoke()
         }
     }
 
@@ -216,6 +222,7 @@ class CandidatesView(
         // update touchEventReceiverWindow's position after CandidatesView's
         touchEventReceiverWindow.showAt(tX.roundToInt(), tY.roundToInt(), w, h)
         shouldUpdatePosition = false
+        onPositionChanged?.invoke()
     }
 
     private fun calculatePositionByCursorAnchor(
@@ -591,6 +598,7 @@ class CandidatesView(
             touchEventReceiverWindow.dismiss()
         }
         super.setVisibility(visibility)
+        onPositionChanged?.invoke()
     }
 
     override fun onDetachedFromWindow() {
