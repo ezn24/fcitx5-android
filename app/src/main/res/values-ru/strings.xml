@@ -51,6 +51,7 @@
     <string name="import_">Импорт</string>
     <string name="synced">Синхронизировано!</string>
     <string name="loading">Загрузка</string>
+    <string name="qr_image_decode_progress">Декодирование QR-кода %1$d из %2$d…</string>
     <string name="clipboard_listening">Прослушивание буфера обмена</string>
     <string name="clipboard_limit">Лимит истории буфера обмена</string>
     <string name="clipboard_enable">Включить буфер обмена</string>
@@ -304,6 +305,7 @@
     <string name="automatic">Автоматическая</string>
     <string name="horizontal">Горизонтальная</string>
     <string name="vertical">Вертикальная</string>
+    <string name="vertical_reversed">Вертикальная (обратная)</string>
     <string name="always">Всегда</string>
     <string name="candidates_position">Позиция окна кандидатов</string>
     <string name="top_left">Вверху слева</string>
@@ -423,6 +425,9 @@
     <string name="text_keyboard_layout_key_color_monet_unavailable">Динамический цвет Monet недоступен</string>
     <string name="text_keyboard_layout_layout_name">Имя раскладки</string>
     <string name="text_keyboard_layout_layout_name_hint">например: rime, pinyin</string>
+    <string name="numeric_layout_override_title">Раскладка клавиатуры для чисел</string>
+    <string name="numeric_layout_override_builtin">Встроенная цифровая клавиатура</string>
+    <string name="numeric_layout_override_unavailable">%1$s (недоступно в текущем профиле)</string>
     <string name="text_keyboard_layout_copy_from">Скопировать из существующей раскладки</string>
     <string name="text_keyboard_layout_name_empty">Имя раскладки не может быть пустым</string>
     <string name="text_keyboard_layout_delete_key_confirm">Удалить эту клавишу?</string>
@@ -438,6 +443,7 @@
     <string name="text_keyboard_layout_key_label_caps">Caps</string>
     <string name="text_keyboard_layout_key_label_lang">Lang</string>
     <string name="text_keyboard_layout_key_label_space">Space</string>
+    <string name="text_keyboard_layout_key_label_minispace">␣</string>
     <string name="text_keyboard_layout_key_label_enter">Enter</string>
     <string name="space_key_label_mode">Стиль подписи клавиши пробела</string>
     <string name="space_key_label_mode_default">По умолчанию</string>
@@ -534,6 +540,12 @@
     <string name="text_keyboard_layout_macro_event_preview">%1$s → … (всего шагов: %2$d)</string>
     <string name="text_keyboard_layout_alt_label">Альтернативная метка</string>
     <string name="text_keyboard_layout_swipe_label">Метка свайпа</string>
+    <string name="text_keyboard_layout_switch_target">Цель</string>
+    <string name="text_keyboard_layout_switch_target_default">По умолчанию (?123 / последняя раскладка символов)</string>
+    <string name="text_keyboard_layout_switch_target_text">Текстовая клавиатура</string>
+    <string name="text_keyboard_layout_switch_target_number">Цифровая клавиатура</string>
+    <string name="text_keyboard_layout_switch_target_symbol">Выбор символов</string>
+    <string name="text_keyboard_layout_numpad_symbol">Символ цифровой клавиатуры</string>
 
     <!-- Macro Editor -->
     <string name="macro_editor_title">Редактировать %1$s</string>
@@ -545,6 +557,7 @@
     <string name="macro_editor_step_type_layer">Переключение слоя</string>
     <string name="macro_editor_step_type_to">Перейти к слою</string>
     <string name="macro_editor_step_type_osl">Одноразовый слой</string>
+    <string name="macro_editor_step_type_back">Вернуться к предыдущему слою</string>
     <string name="macro_editor_step_type_down">Нажать клавишу</string>
     <string name="macro_editor_step_type_up">Отпустить клавишу</string>
     <string name="macro_editor_step_type_text">Ввести текст</string>

@@ -29,6 +29,10 @@ import kotlinx.serialization.json.*
 import kotlinx.serialization.Serializable
 import org.fcitx.fcitx5.android.ui.main.settings.behavior.utils.LayoutJsonUtils
 
+internal fun interface NumericLayoutFallbackListener {
+    fun onNumericLayoutOverrideInvalidated()
+}
+
 @SuppressLint("ViewConstructor")
 class TextKeyboard(
     context: Context,
@@ -72,9 +76,7 @@ class TextKeyboard(
 
         @Synchronized
         private fun onTextLayoutFileChanged() {
-            cachedRawLayoutJson = null
-            lastRawModified = 0L
-            lastRawLayoutFile = null
+            handleLayoutSourceChanged()
             val living = attachedKeyboards.mapNotNull { it.get() }
             attachedKeyboards.removeAll { it.get() == null }
             living.forEach { keyboard ->
@@ -122,6 +124,8 @@ class TextKeyboard(
         private val cachedAuxBarConfigs = mutableMapOf<String, AuxBarConfig?>()
         private var lastLayoutCacheInvalidated = 0L
         private var forcedLayoutKey: String? = null
+        private val numericOverride = NumericLayoutOverrideController()
+        private var numericLayoutFallbackTarget: WeakReference<NumericLayoutFallbackListener>? = null
         var resolvedAuxBarConfig: AuxBarConfig? = null
         var resolvedAuxBarKeys: List<Map<String, Any?>> = emptyList()
 
@@ -134,22 +138,155 @@ class TextKeyboard(
             lastLayoutCacheInvalidated = 0L
         }
 
+        /**
+         * Force a latched/one-shot layer, or clear it (falling back to the numeric-input
+         * layout when one is active). The numeric layout is configured per input session
+         * by [setNumericLayoutKey], so input method updates that clear layer latches keep
+         * the numeric editor on its layout.
+         */
         @Synchronized
         fun setForcedLayoutKey(layoutKey: String?) {
-            val normalized = layoutKey?.trim()?.takeIf { it.isNotEmpty() }
+            numericOverride.force(layoutKey)
+            val normalized = numericOverride.forcedKey
             if (forcedLayoutKey == normalized) return
             forcedLayoutKey = normalized
-            cachedKeyDefLayouts.clear()
-            val living = attachedKeyboards.mapNotNull { it.get() }
-            attachedKeyboards.removeAll { it.get() == null }
-            living.forEach { keyboard ->
+            forEachAttachedKeyboard { keyboard ->
                 keyboard.refreshStyle()
+                keyboard.markLayoutSignatureApplied()
                 ime?.let { keyboard.updateSpaceLabel(it) }
             }
         }
 
         @Synchronized
         fun clearForcedLayoutKey() = setForcedLayoutKey(null)
+
+        @Synchronized
+        fun activateManualNumericLayout(layoutKey: String): Boolean {
+            val wasActive = numericOverride.activateManual(layoutKey)
+            setForcedLayoutKey(layoutKey)
+            return wasActive
+        }
+
+        @Synchronized
+        fun releaseManualNumericLayout(): Boolean {
+            if (!numericOverride.releaseManual()) return false
+            setForcedLayoutKey(null)
+            return true
+        }
+
+        /**
+         * Set the layout used for numeric-only editors of the current input session
+         * (resolved from the numeric_layout_override preference). Called from
+         * [KeyboardWindow.onStartInput] after layer latches have been cleared, so a single
+         * update covers both transitions. `null` restores the default resolution path.
+         */
+        @Synchronized
+        fun setNumericLayoutKey(layoutKey: String?) {
+            val normalized = layoutKey?.trim()?.takeIf { it.isNotEmpty() }
+            if (numericOverride.sessionKey == normalized && forcedLayoutKey == normalized) return
+            numericOverride.beginSession(normalized)
+            // Latched layers were just cleared by the caller; the forced slot now carries
+            // the numeric layout and keeps falling back to it for the rest of the session.
+            forcedLayoutKey = normalized
+            var refreshedAny = false
+            forEachAttachedKeyboard { keyboard ->
+                keyboard.refreshStyle()
+                refreshedAny = true
+                ime?.let { keyboard.updateSpaceLabel(it) }
+            }
+            // Mark the layout signature as applied only for keyboards that actually reloaded
+            // just now. Otherwise the next attach/onInputMethodUpdate must still see the
+            // signature mismatch and rebuild the correct forced layout.
+            if (refreshedAny) {
+                forEachAttachedKeyboard { it.markLayoutSignatureApplied() }
+            }
+        }
+
+        /**
+         * Whether the current input session is a numeric editor carrying a resolvable
+         * layout override (set by [setNumericLayoutKey] from [KeyboardWindow.onStartInput]).
+         * While active, requests to show the built-in Number keyboard are redirected to the
+         * text keyboard so the override applies uniformly no matter how it is reached.
+         */
+        @Synchronized
+        fun isNumericLayoutActive(): Boolean = numericOverride.sessionKey != null
+
+        /**
+         * Release the numeric-input layout override for the rest of the current session,
+         * clearing both the session slot and the forced slot. Used when the user explicitly
+         * switches back to the text keyboard (e.g. an "ABC"-style key in the custom numeric
+         * layout). Unlike [clearForcedLayoutKey], this does not fall back to the numeric
+         * layout, so input method updates will not silently pull the editor back onto it.
+         * A new [onStartInput] call re-applies the override via [setNumericLayoutKey].
+         */
+        @Synchronized
+        fun dismissNumericLayoutOverride() {
+            if (numericOverride.sessionKey == null && forcedLayoutKey == null) return
+            numericOverride.dismiss()
+            forcedLayoutKey = null
+            forEachAttachedKeyboard { keyboard ->
+                keyboard.refreshStyle()
+                keyboard.markLayoutSignatureApplied()
+                ime?.let { keyboard.updateSpaceLabel(it) }
+            }
+        }
+
+        @Synchronized
+        private fun forEachAttachedKeyboard(action: (TextKeyboard) -> Unit) {
+            val living = attachedKeyboards.mapNotNull { it.get() }
+            attachedKeyboards.removeAll { it.get() == null }
+            living.forEach(action)
+        }
+
+        /**
+         * Resolve the layout used for numeric-only editors from the app preference
+         * "numeric_layout_override" (键盘 → 数字键盘布局). The preference names any
+         * layout key, including IME submode keys such as "rime:wanxiang"; users are
+         * responsible for the value. Returns null when unset or unresolvable, in which
+         * case the built-in number keyboard applies. Deliberately decoupled from the
+         * layout JSON: TextKeyboardLayout.json only defines text keyboard layouts.
+         */
+        @Synchronized
+        fun resolveNumericLayoutKey(): String? {
+            val json = textLayoutJson ?: return null
+            val option = AppPrefs.getInstance().keyboard.numericLayoutOverride.getValue()
+                .trim().takeIf { it.isNotEmpty() } ?: return null
+            return option.takeIf { containsLayoutKey(json, it) }
+        }
+
+        /**
+         * Re-resolve the numeric-input layout override against the current layout profile.
+         * A layout file/profile change can invalidate the session override set at the last
+         * [onStartInput]: the referenced layout key may have been removed or renamed, or it
+         * may now map to a different layout. Returns true when a previously active override
+         * no longer resolves and has been dropped.
+         */
+        @Synchronized
+        fun revalidateNumericLayoutOverride(): Boolean {
+            val current = numericOverride.sessionKey ?: return false
+            val resolved = resolveNumericLayoutKey()
+            if (resolved == current) return false
+            val dropped = numericOverride.revalidate(resolved)
+            if (forcedLayoutKey == current) forcedLayoutKey = numericOverride.forcedKey
+            return dropped
+        }
+
+        @Synchronized
+        fun handleLayoutSourceChanged(): Boolean {
+            cachedRawLayoutJson = null
+            lastRawModified = 0L
+            lastRawLayoutFile = null
+            val droppedOverride = revalidateNumericLayoutOverride()
+            if (droppedOverride) {
+                numericLayoutFallbackTarget?.get()?.onNumericLayoutOverrideInvalidated()
+            }
+            return droppedOverride
+        }
+
+        @Synchronized
+        internal fun setNumericLayoutFallbackTarget(listener: NumericLayoutFallbackListener?) {
+            numericLayoutFallbackTarget = listener?.let(::WeakReference)
+        }
 
         @Synchronized
         fun currentLayoutHeightPercentOverride(): Int? {
@@ -842,6 +979,90 @@ class TextKeyboard(
     private var lastLayoutSignature: String? = null
     private fun transformPunctuation(p: String) = punctuationMapping.getOrDefault(p, p)
 
+    private fun selectedLayoutArray(ime: InputMethodEntry): JsonArray? {
+        val json = textLayoutJson ?: return null
+        forcedLayoutKey?.let { forced ->
+            return findLayoutElementByKey(json, forced)
+        }
+        val imeLayoutElement = json[ime.uniqueName] ?: json[ime.displayName]
+        if (imeLayoutElement != null) {
+            val subModeLabel = ime.subMode.run { label.ifEmpty { name.ifEmpty { "" } } }
+            val schemaId = schemaIdFromSubModeIcon(ime.subMode.icon)
+            val subModeName = ime.subMode.name
+            val subModeLayoutElement = resolveSubModeLayoutElement(
+                imeLayoutElement = imeLayoutElement,
+                subModeLabel = subModeLabel,
+                schemaId = schemaId,
+                subModeName = subModeName
+            )
+            // Note: parenthesize explicitly — `?:` binds looser than `?.`,
+            // so without grouping a non-null first operand would NOT return here
+            // and the function would fall through to the "default" lookup (and
+            // wrongly report null for flat layouts that have no "default" key).
+            val layoutArray = parseLayoutArray(subModeLayoutElement)
+                ?: parseLayoutArray(imeLayoutElement)
+            if (layoutArray != null) return layoutArray
+        }
+        return parseLayoutArray(json["default"])
+    }
+
+    private fun layoutArrayUsesSubMode(rows: JsonArray): Boolean {
+        for (rowElement in rows) {
+            val row = rowElement as? JsonArray ?: return true
+            for (keyElement in row) {
+                val key = keyElement as? JsonObject ?: return true
+                if (key["displayText"] is JsonObject) return true
+                val composeOverride = key["composeOverride"] as? JsonObject
+                if (composeOverride?.get("displayText") is JsonObject) return true
+            }
+        }
+        return false
+    }
+
+    private var cachedUsesSubModeKey: String? = null
+    private var cachedUsesSubModeValue = false
+
+    /**
+     * Whether the resolved layout renders sub-mode-specific content. Runs on every layout
+     * signature computation, so memoize the scan result per (layer, ime, sub mode, layout
+     * file revision); the layout JSON is only invalidated when [lastRawModified] changes.
+     */
+    private fun layoutUsesSubMode(ime: InputMethodEntry): Boolean {
+        val cacheKey = buildString {
+            append(forcedLayoutKey ?: "")
+            append('|').append(ime.uniqueName)
+            append('|').append(ime.displayName)
+            append('|').append(ime.subMode.label)
+            append('|').append(ime.subMode.name)
+            append('|').append(ime.subMode.icon)
+            append('|').append(lastRawModified)
+        }
+        if (cachedUsesSubModeKey == cacheKey) return cachedUsesSubModeValue
+        val result = layoutUsesSubModeInternal(ime)
+        cachedUsesSubModeKey = cacheKey
+        cachedUsesSubModeValue = result
+        return result
+    }
+
+    private fun layoutUsesSubModeInternal(ime: InputMethodEntry): Boolean {
+        val json = textLayoutJson ?: return true
+        forcedLayoutKey?.let { forced ->
+            val rows = findLayoutElementByKey(json, forced) ?: return true
+            return layoutArrayUsesSubMode(rows)
+        }
+        val baseElement = json[ime.uniqueName] ?: json[ime.displayName]
+        if (baseElement is JsonObject) {
+            val hasSubModeLayout = baseElement.keys.any { key ->
+                key != LAYOUT_META_KEY &&
+                    key != "default" &&
+                    key != "" &&
+                    parseLayoutArray(baseElement[key]) != null
+            }
+            if (hasSubModeLayout) return true
+        }
+        return layoutArrayUsesSubMode(selectedLayoutArray(ime) ?: return true)
+    }
+
     private fun layoutSignature(ime: InputMethodEntry): String {
         val json = textLayoutJson
         val layoutSource = when {
@@ -851,7 +1072,93 @@ class TextKeyboard(
         }
         val subModeLabel = ime.subMode.run { label.ifEmpty { name.ifEmpty { "" } } }
         val forced = forcedLayoutKey ?: ""
-        return "$layoutSource|$subModeLabel|$forced|$lastRawModified"
+        return buildString {
+            append(layoutSource)
+            if (layoutUsesSubMode(ime)) {
+                append('|')
+                append(subModeLabel)
+            }
+            append('|')
+            append(forced)
+            append('|')
+            append(lastRawModified)
+        }
+    }
+
+    internal fun markLayoutSignatureApplied() {
+        val currentIme = TextKeyboard.ime ?: return
+        lastLayoutSignature = layoutSignature(currentIme)
+    }
+
+    /**
+     * Signature describing which KeyDef layout the keyboard currently renders.
+     * It mirrors the branch logic of [getLayout] so rows cached by BaseKeyboard are only
+     * reused when the resolved layout (layer / input method / sub mode / layout file) is
+     * actually the same.
+     */
+    protected override fun currentLayoutSignature(): String {
+        val json = textLayoutJson
+        val currentIme = ime
+        val showLangSwitch = AppPrefs.getInstance().keyboard.showLangSwitchKey.getValue()
+        val imeName = currentIme?.uniqueName
+        val displayName = currentIme?.displayName
+        val subModeLabel = currentIme?.subMode?.label ?: ""
+        val subModeName = currentIme?.subMode?.name ?: ""
+        val schemaId = schemaIdFromSubModeIcon(currentIme?.subMode?.icon ?: "")
+        // Only distinguish by sub mode when the layout actually renders sub-mode-specific
+        // content; for flat layouts the KeyDef output is identical across sub modes and
+        // including this context would invalidate the row cache on every shift toggle.
+        val usesSubMode = currentIme?.let { layoutUsesSubMode(it) } ?: false
+        val contextKey = if (usesSubMode) {
+            listOf(schemaId, subModeLabel, subModeName)
+                .map { it.trim() }
+                .filter { it.isNotEmpty() }
+                .distinct()
+                .joinToString(separator = "|")
+                .ifEmpty { "none" }
+        } else {
+            "none"
+        }
+        val forced = forcedLayoutKey
+        val branch = when {
+            forced != null && json != null && findLayoutElementByKey(json, forced) != null ->
+                "forced:$forced"
+            imeName != null && json != null &&
+                (json[imeName] != null || displayName?.let { json[it] } != null) -> {
+                val imeLayoutElement = json[imeName] ?: displayName?.let { json[it] }
+                if (imeLayoutElement != null) {
+                    val subModeLayoutElement = resolveSubModeLayoutElement(
+                        imeLayoutElement = imeLayoutElement,
+                        subModeLabel = subModeLabel,
+                        schemaId = schemaId,
+                        subModeName = subModeName
+                    )
+                    if (parseLayoutArray(subModeLayoutElement) != null) {
+                        val matchedSubModeKey = (imeLayoutElement as? JsonObject)?.let { obj ->
+                            subModeCandidates(subModeLabel, schemaId, subModeName)
+                                .firstOrNull { obj[it] != null }
+                        } ?: "default"
+                        "ime:$imeName:$matchedSubModeKey"
+                    } else if (json["default"]?.let { parseLayoutArray(it) } != null) {
+                        "default"
+                    } else {
+                        "builtin"
+                    }
+                } else if (json["default"]?.let { parseLayoutArray(it) } != null) {
+                    "default"
+                } else {
+                    "builtin"
+                }
+            }
+            json?.get("default")?.let { parseLayoutArray(it) } != null -> "default"
+            else -> "builtin"
+        }
+        return buildString {
+            append(branch)
+            append('|').append(showLangSwitch)
+            append('|').append(contextKey)
+            append('|').append(lastRawModified)
+        }
     }
 
     override fun onAction(action: KeyAction, source: KeyActionListener.Source) {

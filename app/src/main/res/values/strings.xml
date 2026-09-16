@@ -52,6 +52,7 @@
     <string name="import_">Import</string>
     <string name="synced">Synced!</string>
     <string name="loading">Loading</string>
+    <string name="qr_image_decode_progress">Decoding QR code %1$d of %2$d…</string>
     <string name="clipboard_listening">Clipboard listening</string>
     <string name="clipboard_limit">Clipboard history limit</string>
     <string name="clipboard_limit_local">Local clipboard history limit</string>
@@ -437,6 +438,7 @@
     <string name="automatic">Automatic</string>
     <string name="horizontal">Horizontal</string>
     <string name="vertical">Vertical</string>
+    <string name="vertical_reversed">Vertical (reversed)</string>
     <string name="always">Always</string>
     <string name="candidates_position">Candidates window position</string>
     <string name="top_left">Top Left</string>
@@ -620,6 +622,9 @@
     <string name="text_keyboard_layout_key_color_monet_unavailable">Monet dynamic color is unavailable on this device</string>
     <string name="text_keyboard_layout_layout_name">Layout Name</string>
     <string name="text_keyboard_layout_layout_name_hint">e.g., rime, pinyin</string>
+    <string name="numeric_layout_override_title">Numeric keyboard layout</string>
+    <string name="numeric_layout_override_builtin">Built-in number keypad</string>
+    <string name="numeric_layout_override_unavailable">%1$s (unavailable in current profile)</string>
     <string name="text_keyboard_layout_copy_from">Copy from existing layout</string>
     <string name="text_keyboard_layout_name_empty">Layout name cannot be empty</string>
     <string name="text_keyboard_layout_delete_key_confirm">Delete this key?</string>
@@ -642,10 +647,17 @@
     <string name="text_keyboard_layout_macro_event_preview">%1$s → … (%2$d steps total)</string>
     <string name="text_keyboard_layout_alt_label">Alt Label</string>
     <string name="text_keyboard_layout_swipe_label">Swipe Label</string>
+    <string name="text_keyboard_layout_switch_target">Target</string>
+    <string name="text_keyboard_layout_switch_target_default">Default (?123 / last symbol layout)</string>
+    <string name="text_keyboard_layout_switch_target_text">Text keyboard</string>
+    <string name="text_keyboard_layout_switch_target_number">Number keyboard</string>
+    <string name="text_keyboard_layout_switch_target_symbol">Symbol picker</string>
+    <string name="text_keyboard_layout_numpad_symbol">Numpad Symbol</string>
     <string name="text_keyboard_layout_display_value_hint">Display value</string>
     <string name="text_keyboard_layout_key_label_caps">Caps</string>
     <string name="text_keyboard_layout_key_label_lang">Lang</string>
     <string name="text_keyboard_layout_key_label_space">Space</string>
+    <string name="text_keyboard_layout_key_label_minispace">␣</string>
     <string name="text_keyboard_layout_key_label_enter">Enter</string>
     <string name="text_keyboard_layout_alphabet_key_main_required">Main character must not be empty</string>
     <string name="text_keyboard_layout_alphabet_key_alt_required">Alt character must not be empty</string>
@@ -664,6 +676,7 @@
     <string name="macro_editor_step_type_layer">Layer Switch</string>
     <string name="macro_editor_step_type_to">To Layer</string>
     <string name="macro_editor_step_type_osl">One-shot Layer</string>
+    <string name="macro_editor_step_type_back">Back to Previous Layer</string>
     <string name="macro_editor_step_type_down">Press Key</string>
     <string name="macro_editor_step_type_up">Release Key</string>
     <string name="macro_editor_step_type_text">Input Text</string>
@@ -790,7 +803,7 @@
     <string name="icon_theme_keyboard_keys">Keyboard Keys</string>
     <string name="icon_theme_toolbar_buttons">Toolbar Buttons</string>
     <string name="icon_theme_system_buttons">System Buttons</string>
-    <string name="icon_theme_customized">%s (%d customized)</string>
+    <string name="icon_theme_customized">%1$s (%2$d customized)</string>
     <string name="icon_theme_builtin_ref">Built-in icon:</string>
     <string name="icon_theme_builtin_short">Built-in</string>
     <string name="icon_theme_custom_resource">Custom</string>

@@ -97,16 +97,26 @@ class StatusAreaWindow : InputWindow.ExtendedInputWindow<StatusAreaWindow>(),
     private fun staticEntries(actions: Array<Action>): Array<StatusAreaEntry> {
         val config = currentButtonsConfig.ifEmpty { loadButtonsConfig() }
         // Filter out input_method_options as it's always added automatically at the end
-        val configurableEntries = config.filter {
-            it.id != "input_method_options" &&
-                (it.id != "chttrans_toggle" || isPinyinInputMethod())
-        }.mapNotNull { button ->
+        val configurableEntries = config
+            .filter {
+                it.id != "input_method_options" &&
+                    (it.id != "chttrans_toggle" || isPinyinInputMethod())
+            }
+            .distinctBy { it.id }
+            .mapNotNull { button ->
             // Handle custom action buttons
             if (button.macroSteps != null) {
                 val label = button.label ?: button.id
                 val iconRes = if (!button.text.isNullOrEmpty()) 0
                 else ButtonAction.fromId(button.id)?.defaultIcon ?: R.drawable.ic_baseline_more_horiz_24
-                return@mapNotNull StatusAreaEntry.CustomEntry(button.id, button.macroSteps, label, iconRes, displayText = button.text)
+                return@mapNotNull StatusAreaEntry.CustomEntry(
+                    button.id,
+                    button.macroSteps,
+                    label,
+                    iconRes,
+                    displayText = button.text,
+                    customIcon = button.icon
+                )
             }
             // Find the corresponding ButtonAction
             val action = ButtonAction.fromId(button.id) ?: return@mapNotNull null
@@ -136,7 +146,15 @@ class StatusAreaWindow : InputWindow.ExtendedInputWindow<StatusAreaWindow>(),
                 null
             }
 
-            StatusAreaEntry.ActionEntry(action, label, iconRes, active, longPressAction, displayText = displayText)
+            StatusAreaEntry.ActionEntry(
+                action,
+                label,
+                iconRes,
+                active,
+                longPressAction,
+                displayText = displayText,
+                customIcon = button.icon
+            )
         }
 
         // Always add input_method_options at the end (fixed, not configurable)

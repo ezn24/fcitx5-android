@@ -48,6 +48,7 @@
     <string name="import_">가져오기</string>
     <string name="synced">동기화되었습니다!</string>
     <string name="loading">불러오는 중</string>
+    <string name="qr_image_decode_progress">QR 코드 %1$d/%2$d 디코딩 중…</string>
     <string name="clipboard_listening">클립보드 수신 대기</string>
     <string name="clipboard_limit">클립보드 기록 제한</string>
     <string name="clipboard_enable">클립보드 활성화</string>
@@ -181,6 +182,9 @@
     <string name="text_keyboard_layout_key_color_monet_unavailable">Monet 동적 색상을 사용할 수 없습니다</string>
     <string name="text_keyboard_layout_layout_name">레이아웃 이름</string>
     <string name="text_keyboard_layout_layout_name_hint">예: rime, pinyin</string>
+    <string name="numeric_layout_override_title">숫자 입력 키보드 레이아웃</string>
+    <string name="numeric_layout_override_builtin">기본 숫자 키보드</string>
+    <string name="numeric_layout_override_unavailable">%1$s (현재 프로필에서 사용할 수 없음)</string>
     <string name="text_keyboard_layout_copy_from">기존 레이아웃에서 복사</string>
     <string name="text_keyboard_layout_name_empty">레이아웃 이름은 비워둘 수 없습니다</string>
     <string name="text_keyboard_layout_delete_key_confirm">이 키를 삭제하시겠습니까?</string>
@@ -196,6 +200,7 @@
     <string name="text_keyboard_layout_key_label_caps">Caps</string>
     <string name="text_keyboard_layout_key_label_lang">Lang</string>
     <string name="text_keyboard_layout_key_label_space">Space</string>
+    <string name="text_keyboard_layout_key_label_minispace">␣</string>
     <string name="text_keyboard_layout_key_label_enter">Enter</string>
     <string name="space_key_label_mode">스페이스 키 라벨 스타일</string>
     <string name="space_key_label_mode_default">기본값</string>
@@ -287,6 +292,7 @@
     <string name="automatic">자동</string>
     <string name="horizontal">가로</string>
     <string name="vertical">세로</string>
+    <string name="vertical_reversed">세로 (역순)</string>
     <string name="always">항상</string>
     <string name="candidates_position">후보 창 위치</string>
     <string name="top_left">왼쪽 상단</string>
@@ -315,6 +321,12 @@
     <string name="text_keyboard_layout_macro_event_preview">%1$s → … (총 %2$d 단계)</string>
     <string name="text_keyboard_layout_alt_label">대체 레이블</string>
     <string name="text_keyboard_layout_swipe_label">스와이프 레이블</string>
+    <string name="text_keyboard_layout_switch_target">대상</string>
+    <string name="text_keyboard_layout_switch_target_default">기본 (?123 / 마지막 기호 레이아웃)</string>
+    <string name="text_keyboard_layout_switch_target_text">텍스트 키보드</string>
+    <string name="text_keyboard_layout_switch_target_number">숫자 키보드</string>
+    <string name="text_keyboard_layout_switch_target_symbol">기호 선택기</string>
+    <string name="text_keyboard_layout_numpad_symbol">숫자 패드 기호</string>
 
     <!-- Macro Editor -->
     <string name="macro_editor_title">%1$s 편집</string>
@@ -326,6 +338,7 @@
     <string name="macro_editor_step_type_layer">레이어 전환</string>
     <string name="macro_editor_step_type_to">레이어로 전환</string>
     <string name="macro_editor_step_type_osl">원샷 레이어</string>
+    <string name="macro_editor_step_type_back">이전 레이어로 돌아가기</string>
     <string name="macro_editor_step_type_down">키 누르기</string>
     <string name="macro_editor_step_type_up">키 떼기</string>
     <string name="macro_editor_step_type_text">텍스트 입력</string>

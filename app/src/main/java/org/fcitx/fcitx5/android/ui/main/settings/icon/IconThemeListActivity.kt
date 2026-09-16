@@ -45,10 +45,12 @@ import org.fcitx.fcitx5.android.R
 import org.fcitx.fcitx5.android.BuildConfig
 import org.fcitx.fcitx5.android.data.theme.IconTheme
 import org.fcitx.fcitx5.android.data.theme.IconThemeManager
+import org.fcitx.fcitx5.android.data.theme.ThemeManager
 import org.fcitx.fcitx5.android.ui.main.settings.behavior.share.JsonFileQrShareManager
 import org.fcitx.fcitx5.android.ui.main.settings.behavior.share.LayoutQrBitmapUtil
 import org.fcitx.fcitx5.android.ui.main.settings.behavior.share.LayoutQrTransferCodec
 import org.fcitx.fcitx5.android.ui.main.settings.behavior.share.QrChunkCollector
+import org.fcitx.fcitx5.android.ui.common.withProgressLoadingDialog
 import org.fcitx.fcitx5.android.ui.main.settings.behavior.share.QrScanOptions
 import splitties.dimensions.dp
 import splitties.resources.styledColor
@@ -70,6 +72,9 @@ class IconThemeListActivity : AppCompatActivity() {
 
     private val onListChangeListener = IconThemeManager.OnIconThemeListChangeListener { refreshThemes() }
     private val onThemeChangeListener = IconThemeManager.OnIconThemeChangeListener { refreshThemes() }
+    private val onKeyboardThemeChangeListener = ThemeManager.OnThemeChangeListener {
+        adapter.notifyDataSetChanged()
+    }
 
     private val jsonImportLauncher = registerForActivityResult(
         ActivityResultContracts.GetContent()
@@ -103,6 +108,7 @@ class IconThemeListActivity : AppCompatActivity() {
         WindowCompat.setDecorFitsSystemWindows(window, true)
         IconThemeManager.addOnListChangeListener(onListChangeListener)
         IconThemeManager.addOnChangedListener(onThemeChangeListener)
+        ThemeManager.addOnChangedListener(onKeyboardThemeChangeListener)
 
         val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
 
@@ -138,6 +144,7 @@ class IconThemeListActivity : AppCompatActivity() {
         super.onDestroy()
         IconThemeManager.removeOnListChangeListener(onListChangeListener)
         IconThemeManager.removeOnChangedListener(onThemeChangeListener)
+        ThemeManager.removeOnChangedListener(onKeyboardThemeChangeListener)
     }
 
     override fun onCreateOptionsMenu(menu: Menu): Boolean {
@@ -177,16 +184,39 @@ class IconThemeListActivity : AppCompatActivity() {
     }
 
     private fun importFromQrImage(uri: Uri) {
-        try {
-            val chunks = JsonFileQrShareManager.decodeQrChunksFromImage(this, uri)
-            if (chunks.isEmpty()) {
-                Toast.makeText(this, getString(R.string.icon_theme_no_qr_found), Toast.LENGTH_SHORT).show()
-                return
+        lifecycleScope.withProgressLoadingDialog(this) { updateProgress ->
+            val chunks = try {
+                withContext(Dispatchers.Default) {
+                    JsonFileQrShareManager.decodeQrChunksFromImage(this@IconThemeListActivity, uri) { current, total ->
+                        updateProgress(getString(R.string.qr_image_decode_progress, current, total))
+                    }
+                }
+            } catch (_: Exception) {
+                Toast.makeText(
+                    this@IconThemeListActivity,
+                    getString(R.string.icon_theme_decode_qr_failed),
+                    Toast.LENGTH_SHORT
+                ).show()
+                return@withProgressLoadingDialog
             }
-            val json = LayoutQrTransferCodec.decodeChunksToJson(chunks)
-            importThemeFromJson(json)
-        } catch (_: Exception) {
-            Toast.makeText(this, getString(R.string.icon_theme_decode_qr_failed), Toast.LENGTH_SHORT).show()
+            if (chunks.isEmpty()) {
+                Toast.makeText(
+                    this@IconThemeListActivity,
+                    getString(R.string.icon_theme_no_qr_found),
+                    Toast.LENGTH_SHORT
+                ).show()
+                return@withProgressLoadingDialog
+            }
+            try {
+                val json = LayoutQrTransferCodec.decodeChunksToJson(chunks)
+                importThemeFromJson(json)
+            } catch (_: Exception) {
+                Toast.makeText(
+                    this@IconThemeListActivity,
+                    getString(R.string.icon_theme_decode_qr_failed),
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
         }
     }
 
@@ -563,7 +593,7 @@ class ThemeThumbnailUi(private val context: android.content.Context, private val
             ?.let { SlotRowUi.renderSvgPreview(context, it, 36) }
         if (thumbnailDrawable != null) {
             previewIcon.setImageDrawable(thumbnailDrawable)
-            previewIcon.imageTintList = null
+            previewIcon.imageTintList = ColorStateList.valueOf(if (isActive) accent else primary)
         } else {
             val fallback = AppCompatResources.getDrawable(context, R.drawable.ic_icon_theme_24)?.mutate()
             val fallbackSize = context.dp(36)

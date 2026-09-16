@@ -94,6 +94,7 @@ import org.fcitx.fcitx5.android.utils.forceShowSelf
 import org.fcitx.fcitx5.android.utils.inputMethodManager
 import org.fcitx.fcitx5.android.utils.isTypeNull
 import org.fcitx.fcitx5.android.utils.monitorCursorAnchor
+import org.fcitx.fcitx5.android.utils.styledColorOrDefault
 import org.fcitx.fcitx5.android.utils.styledFloat
 import org.fcitx.fcitx5.android.utils.userManager
 import org.fcitx.fcitx5.android.utils.withBatchEdit
@@ -102,6 +103,13 @@ import splitties.dimensions.dp
 import splitties.resources.styledColor
 import timber.log.Timber
 import kotlin.math.max
+
+/**
+ * All numpad key codes, from [KeyEvent.KEYCODE_NUMPAD_0] to [KeyEvent.KEYCODE_NUMPAD_RIGHT_PAREN].
+ * For these keys the simulated key events always carry [KeyEvent.META_NUM_LOCK_ON] so that
+ * Android KeyCharacterMap resolves the digit/symbol characters instead of navigation keys.
+ */
+private val NUMPAD_KEYCODE_RANGE = KeyEvent.KEYCODE_NUMPAD_0..KeyEvent.KEYCODE_NUMPAD_RIGHT_PAREN
 
 class FcitxInputMethodService : LifecycleInputMethodService() {
 
@@ -280,7 +288,7 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
 
     private var cursorUpdateIndex: Int = 0
 
-    private var highlightColor: Int = 0x66008577 // material_deep_teal_500 with alpha 0.4
+    private var highlightColor: Int = DefaultHighlightColor
 
     private val prefs = AppPrefs.getInstance()
     private val inlineSuggestions by prefs.keyboard.inlineSuggestions
@@ -990,11 +998,8 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
 
     override fun onWindowShown() {
         super.onWindowShown()
-        try {
-            highlightColor = styledColor(android.R.attr.colorAccent).alpha(0.4f)
-        } catch (_: Exception) {
-            Timber.w("Device does not support android.R.attr.colorAccent which it should have.")
-        }
+        highlightColor =
+            styledColorOrDefault(android.R.attr.colorAccent, DefaultHighlightColor).alpha(0.4f)
         InputFeedbacks.syncSystemPrefs()
         applyPendingThemeIfPossible()
     }
@@ -1232,15 +1237,14 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
         setVirtualCapsLockState(event.isCapsLockOn)
     }
 
-    public fun sendSimulatedKeyEvent(keyCode: Int, scanCode: Int, action: Int, fromMacro: Boolean = false) {
-        val eventTime = SystemClock.uptimeMillis()
-        if (action == KeyEvent.ACTION_DOWN) {
-            when (keyCode) {
-                KeyEvent.KEYCODE_CAPS_LOCK -> {
-                    simulatedCapsLockPressed = true
-                    simulatedCapsLockPressedFromMacro = fromMacro
-                }
-                KeyEvent.KEYCODE_NUM_LOCK -> simulatedNumLockPressed = true
+    /**
+     * Track modifier hold state for simulated key events (shared by the keyboard macro path
+     * [sendSimulatedKeyEvent] and the custom-button path [sendSimulatedKeyEventOrFallback]) so
+     * key taps/shortcuts carry the correct metaState (e.g. Ctrl+A is not just a plain "a").
+     */
+    private fun updateSimulatedModifierCount(keyCode: Int, action: Int) {
+        when (action) {
+            KeyEvent.ACTION_DOWN -> when (keyCode) {
                 KeyEvent.KEYCODE_SHIFT_LEFT, KeyEvent.KEYCODE_SHIFT_RIGHT -> simulatedShiftPressedCount += 1
                 KeyEvent.KEYCODE_CTRL_LEFT, KeyEvent.KEYCODE_CTRL_RIGHT -> simulatedCtrlPressedCount += 1
                 KeyEvent.KEYCODE_ALT_LEFT -> simulatedAltPressedCount += 1
@@ -1251,38 +1255,83 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
                 KeyEvent.KEYCODE_META_LEFT, KeyEvent.KEYCODE_META_RIGHT -> simulatedMetaPressedCount += 1
                 KeyEvent.KEYCODE_FUNCTION -> simulatedFunctionPressedCount += 1
             }
-        } else if (action == KeyEvent.ACTION_UP) {
-            when (keyCode) {
-                KeyEvent.KEYCODE_SHIFT_LEFT, KeyEvent.KEYCODE_SHIFT_RIGHT -> {
+            KeyEvent.ACTION_UP -> when (keyCode) {
+                KeyEvent.KEYCODE_SHIFT_LEFT, KeyEvent.KEYCODE_SHIFT_RIGHT ->
                     simulatedShiftPressedCount = (simulatedShiftPressedCount - 1).coerceAtLeast(0)
-                }
-                KeyEvent.KEYCODE_CTRL_LEFT, KeyEvent.KEYCODE_CTRL_RIGHT -> {
+                KeyEvent.KEYCODE_CTRL_LEFT, KeyEvent.KEYCODE_CTRL_RIGHT ->
                     simulatedCtrlPressedCount = (simulatedCtrlPressedCount - 1).coerceAtLeast(0)
-                }
-                KeyEvent.KEYCODE_ALT_LEFT -> {
+                KeyEvent.KEYCODE_ALT_LEFT ->
                     simulatedAltPressedCount = (simulatedAltPressedCount - 1).coerceAtLeast(0)
-                }
                 KeyEvent.KEYCODE_ALT_RIGHT -> {
                     simulatedAltPressedCount = (simulatedAltPressedCount - 1).coerceAtLeast(0)
                     simulatedAltRightPressedCount = (simulatedAltRightPressedCount - 1).coerceAtLeast(0)
                 }
-                KeyEvent.KEYCODE_META_LEFT, KeyEvent.KEYCODE_META_RIGHT -> {
+                KeyEvent.KEYCODE_META_LEFT, KeyEvent.KEYCODE_META_RIGHT ->
                     simulatedMetaPressedCount = (simulatedMetaPressedCount - 1).coerceAtLeast(0)
-                }
-                KeyEvent.KEYCODE_FUNCTION -> {
+                KeyEvent.KEYCODE_FUNCTION ->
                     simulatedFunctionPressedCount = (simulatedFunctionPressedCount - 1).coerceAtLeast(0)
-                }
             }
         }
+    }
+
+    private fun simulatedMetaState(keyCode: Int): Int {
         var metaState = 0
         if (simulatedCapsLockOn) metaState = metaState or KeyEvent.META_CAPS_LOCK_ON
-        if (simulatedNumLockOn) metaState = metaState or KeyEvent.META_NUM_LOCK_ON
+        // Num lock is always treated as ON for numpad keys from the simulated keyboard,
+        // so that Android KeyCharacterMap produces the correct digit/symbol unicode
+        // characters instead of converting them to navigation keys.
+        if (simulatedNumLockOn || keyCode in NUMPAD_KEYCODE_RANGE) {
+            metaState = metaState or KeyEvent.META_NUM_LOCK_ON
+        }
         if (simulatedShiftPressedCount > 0) metaState = metaState or KeyEvent.META_SHIFT_ON
         if (simulatedCtrlPressedCount > 0) metaState = metaState or KeyEvent.META_CTRL_ON
         if (simulatedAltPressedCount > 0) metaState = metaState or KeyEvent.META_ALT_ON
         if (simulatedMetaPressedCount > 0) metaState = metaState or KeyEvent.META_META_ON
         if (simulatedFunctionPressedCount > 0) metaState = metaState or KeyEvent.META_FUNCTION_ON
         if (simulatedAltRightPressedCount > 0) metaState = metaState or KeyEvent.META_ALT_RIGHT_ON
+        return metaState
+    }
+
+    /**
+     * Send a simulated key event directly to the current input connection (custom buttons on the
+     * Kawaii bar / status area). Like [sendSimulatedKeyEvent], it tracks modifier hold state so
+     * shortcuts and modifier-composed macros carry the correct metaState to the app.
+     */
+    public fun sendSimulatedKeyEventOrFallback(keyCode: Int, isDown: Boolean) {
+        val action = if (isDown) KeyEvent.ACTION_DOWN else KeyEvent.ACTION_UP
+        updateSimulatedModifierCount(keyCode, action)
+        val eventTime = SystemClock.uptimeMillis()
+        val scanCode = getCachedScancode(keyCode)
+        currentInputConnection?.sendKeyEvent(
+            KeyEvent(
+                eventTime,
+                eventTime,
+                action,
+                keyCode,
+                0,
+                simulatedMetaState(keyCode),
+                KeyCharacterMap.VIRTUAL_KEYBOARD,
+                scanCode,
+                KeyEvent.FLAG_SOFT_KEYBOARD or KeyEvent.FLAG_KEEP_TOUCH_MODE
+            )
+        )
+    }
+
+    public fun sendSimulatedKeyEvent(keyCode: Int, scanCode: Int, action: Int, fromMacro: Boolean = false) {
+        val eventTime = SystemClock.uptimeMillis()
+        if (action == KeyEvent.ACTION_DOWN) {
+            when (keyCode) {
+                KeyEvent.KEYCODE_CAPS_LOCK -> {
+                    simulatedCapsLockPressed = true
+                    simulatedCapsLockPressedFromMacro = fromMacro
+                }
+                KeyEvent.KEYCODE_NUM_LOCK -> simulatedNumLockPressed = true
+            }
+            updateSimulatedModifierCount(keyCode, action)
+        } else if (action == KeyEvent.ACTION_UP) {
+            updateSimulatedModifierCount(keyCode, action)
+        }
+        val metaState = simulatedMetaState(keyCode)
         // Use InputDevice.SOURCE_KEYBOARD so the system uses the physical keyboard KeyCharacterMap
         // This makes function keys (F1-F12) return unicodeChar = 0 and follow the keyCodeToSym path
         val event = KeyEvent(
@@ -1300,6 +1349,10 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
         Timber.v("sendSimulatedKeyEvent: keyCode=%d scanCode=%d action=%d unicodeChar=%d",
             keyCode, scanCode, action, event.unicodeChar)
         forwardKeyEvent(event, preserveModifierState = true)
+        if (fromMacro) {
+            inputView?.clearKawaiiBarFocusState()
+            inputView?.post { inputView?.clearKawaiiBarFocusState() }
+        }
 
         if (action == KeyEvent.ACTION_UP) {
             when (keyCode) {
@@ -1889,6 +1942,7 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
 
     @Suppress("ConstPropertyName")
     companion object {
+        const val DefaultHighlightColor = 0x66008577 // material_deep_teal_500 with alpha 0.4
         const val DeleteSurroundingFlag = "org.fcitx.fcitx5.android.DELETE_SURROUNDING"
     }
 }

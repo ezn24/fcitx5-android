@@ -133,6 +133,16 @@ class KawaiiBarComponent : UniqueViewComponent<KawaiiBarComponent, FrameLayout>(
         idleUi.buttonsUi.refreshLayout()
     }
 
+    /**
+     * Macro-simulated key events can move focus out of touch mode. Clear any
+     * stale focus from toolbar descendants before Android renders a focus highlight.
+     */
+    fun clearFocusState() {
+        view.clearFocus()
+        idleUi.root.clearFocus()
+        idleUi.buttonsUi.root.clearFocus()
+    }
+
     private val prefs = AppPrefs.getInstance()
 
     private val clipboardSuggestion = prefs.clipboard.clipboardSuggestion
@@ -745,6 +755,14 @@ class KawaiiBarComponent : UniqueViewComponent<KawaiiBarComponent, FrameLayout>(
     private fun switchUiByState(state: KawaiiBarStateMachine.State) {
         val index = state.ordinal
         if (view.displayedChild == index) return
+        if (
+            view.displayedChild == KawaiiBarStateMachine.State.Idle.ordinal &&
+            state == KawaiiBarStateMachine.State.Title
+        ) {
+            // An extended window replaces IdleUi immediately. End its unbounded button
+            // ripples before the title bar is drawn in the same region.
+            idleUi.clearTransientPressState()
+        }
         val new = view.getChildAt(index)
         if (new != titleUi.root) {
             titleUi.setReturnButtonOnClickListener { }
@@ -756,6 +774,9 @@ class KawaiiBarComponent : UniqueViewComponent<KawaiiBarComponent, FrameLayout>(
 
     override val view by lazy {
         ViewAnimator(context).apply {
+            isFocusable = false
+            isFocusableInTouchMode = false
+            descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
             backgroundColor =
                 if (ThemeManager.prefs.keyBorder.getValue()) Color.TRANSPARENT
                 else theme.barColor

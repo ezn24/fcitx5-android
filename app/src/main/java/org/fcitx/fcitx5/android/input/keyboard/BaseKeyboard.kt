@@ -140,7 +140,6 @@ abstract class BaseKeyboard(
     private val disabledSwipeThreshold = dp(800f)
 
     private val bounds = Rect()
-    private val childLocationInWindow = intArrayOf(0, 0)
     private lateinit var keyRows: List<ConstraintLayout>
     private var keyboardWaterRippleView: KeyboardWaterRippleView? = null
     private var cachedWaterRippleColor: Int? = null
@@ -172,7 +171,32 @@ abstract class BaseKeyboard(
 
     private val composeAwareKeys = mutableListOf<ComposeAwareKey>()
 
+    private data class ReusableRows(
+        val defs: List<List<KeyDef>>,
+        val containers: List<ConstraintLayout>
+    )
+
+    // Rows built by a previous reload are cached per layout/style signature and reused on
+    // the next reload with the same signature. Rebuilding the whole view tree on every key
+    // press (macrokey "layer to" or shift-based language switching) is the dominant source
+    // of input latency; reusing prebuilt rows skips the expensive view construction entirely.
+    // NOTE: must be declared before the init block, which triggers the first reloadLayout().
+    private val reusableRowsCache = object : LinkedHashMap<String, ReusableRows>(16, 0.75f, true) {
+        override fun removeEldestEntry(eldest: Map.Entry<String, ReusableRows>): Boolean =
+            size > MAX_CACHED_ROWS
+    }
+    private var lastRowsSignature: String? = null
+
+    private companion object {
+        const val MAX_CACHED_ROWS = 12
+    }
+
     private var lastSplitLandscapeState = false
+
+    private class TouchTarget(val view: KeyView)
+
+    /** Active pointer targets for the custom touch dispatch workaround. */
+    private val touchTargets = hashMapOf<Int, TouchTarget>()
 
     @Keep
     private val splitStateChangeListener = SplitKeyboardStateManager.OnSplitStateChangeListener { shouldSplit ->
@@ -185,11 +209,6 @@ abstract class BaseKeyboard(
             updateBounds()
         }
     }
-
-    /**
-     * HashMap of [PointerId (Int)][MotionEvent.getPointerId] to [KeyView]
-     */
-    private val touchTarget = hashMapOf<Int, View>()
 
     /**
      * Find a key view by its type tag. Returns the first matching view or null if not found.
@@ -207,8 +226,98 @@ abstract class BaseKeyboard(
         splitKeyboardManager.registerListener(splitStateChangeListener)
     }
 
+    /**
+     * Signature identifying the semantic keyboard content (layer, input method, sub mode, ...).
+     * Every subclass must implement this so cached rows are never reused across different
+     * layouts. For static layouts a constant identifying the layout is sufficient; layouts
+     * that change at runtime must derive the signature from the resolved layout inputs.
+     */
+    protected abstract fun currentLayoutSignature(): String
+
+    private fun currentRowsSignature(splitKeyboard: Boolean): String {
+        val prefs = ThemeManager.prefs
+        return buildString {
+            append(currentLayoutSignature())
+            append("|split:").append(splitKeyboard)
+            append("|orient:").append(resources.configuration.orientation)
+            append("|composing:").append(composing)
+            append("|gapScale:").append(horizontalGapScale)
+            append("|border:").append(prefs.keyBorder.getValue()).append(prefs.keyBorderStroke.getValue())
+            append("|ripple:").append(prefs.keyRippleEffect.getValue())
+            append("|radius:").append(prefs.keyRadius.getValue())
+            append("|oval:").append(prefs.specialKeyOvalShape.getValue())
+            append("|hMargins:").append(prefs.keyHorizontalMargin.getValue())
+                .append(",").append(prefs.keyHorizontalMarginLandscape.getValue())
+            append("|vMargins:").append(prefs.keyVerticalMargin.getValue())
+                .append(",").append(prefs.keyVerticalMarginLandscape.getValue())
+            append("|expandKeys:").append(AppPrefs.getInstance().keyboard.expandKeypressArea.getValue())
+            append("|splitGap:").append(splitKeyboardManager.getSplitGapPercent())
+            append("|fontRefresh:").append(FontProviders.needsRefresh())
+        }
+    }
+
+    /**
+     * Re-register keyboard-level state for a reused row set. KeyViews keep the gesture
+     * configuration they were built with, so only the registries rebuilt on every reload
+     * (space keys, compose-aware keys) need to be repopulated.
+     *
+     * Validate every row before changing either registry. This keeps a stale cache entry
+     * from leaving partially registered state behind when the caller falls back to a rebuild.
+     */
+    private fun registerReusableRowState(rows: List<List<KeyDef>>, containers: List<ConstraintLayout>): Boolean {
+        val validatedRows = ArrayList<List<Pair<KeyDef, KeyView>>>(rows.size)
+        rows.forEachIndexed { rowIndex, rowDefs ->
+            val container = containers.getOrNull(rowIndex) ?: return false
+            val keyViews = container.children.mapNotNull { it as? KeyView }.toList()
+            if (keyViews.size != rowDefs.size) return false
+            val validatedRow = ArrayList<Pair<KeyDef, KeyView>>(rowDefs.size)
+            rowDefs.forEachIndexed { keyIndex, def ->
+                val keyView = keyViews[keyIndex]
+                val matchesDef = keyView.def === def.appearance ||
+                    def.composeOverride?.appearance === keyView.def
+                if (!matchesDef) return false
+                validatedRow += def to keyView
+            }
+            validatedRows += validatedRow
+        }
+
+        validatedRows.forEach { row ->
+            row.forEach { (def, keyView) ->
+                if ((def is SpaceKey || def is MiniSpaceKey) && !spaceKeys.contains(keyView)) {
+                    spaceKeys.add(keyView)
+                }
+                if (def.composeOverride != null) {
+                    composeAwareKeys += ComposeAwareKey(
+                        def,
+                        keyView,
+                        GestureBaseline(
+                            swipeEnabled = keyView.swipeEnabled,
+                            swipeRepeatEnabled = keyView.swipeRepeatEnabled,
+                            swipeThresholdX = keyView.swipeThresholdX,
+                            swipeThresholdY = keyView.swipeThresholdY,
+                            onGestureListener = keyView.onGestureListener
+                        )
+                    )
+                }
+            }
+        }
+        return true
+    }
+
     protected open fun reloadLayout() {
         val startedAt = SystemClock.elapsedRealtime()
+        // Detach ripple-occluder listeners from views of the outgoing tree before it is
+        // discarded or cached; the ripple view itself is recreated on every reload.
+        keyboardWaterRippleView?.setOccluders(emptyList())
+        // Cached rows are nested in mainGridContainer rather than directly in this view.
+        // Removing the main grid does not clear the rows' parent, so detach them explicitly
+        // before a cached row is added to the new grid.
+        reusableRowsCache.values
+            .flatMap { it.containers }
+            .distinct()
+            .forEach { row ->
+                (row.parent as? ViewGroup)?.removeView(row)
+            }
         removeAllViews()
         auxBarInnerContainer = null
         auxBarScrollableAdapter = null
@@ -221,7 +330,7 @@ abstract class BaseKeyboard(
             add(rippleView, lParams(matchParent, matchParent))
         }
         spaceKeys.clear()
-        touchTarget.clear()
+        releaseAllTouchTargets()
         composeAwareKeys.clear()
 
         val splitKeyboard = splitKeyboardManager.shouldUseSplitKeyboard(width)
@@ -229,17 +338,31 @@ abstract class BaseKeyboard(
         val rows = keyLayout
         rowHeightPercents = resolveRowHeightPercents(rows)
 
-        keyRows = rows.map { row ->
-            val keyViews = row.map(::createKeyView).apply {
-                // Batch apply fontset mappings for all key labels.
-                forEach(::applyConfiguredFonts)
+        val rowsSignature = currentRowsSignature(splitKeyboard)
+        val cachedRows = reusableRowsCache[rowsSignature]
+        // Reuse only when the cached rows were built from the exact same KeyDef instances;
+        // providers that re-create defs on every call (e.g. the builtin fallback layout)
+        // then rebuild instead of silently re-registering mismatched state.
+        keyRows = if (cachedRows != null && cachedRows.defs === rows &&
+            registerReusableRowState(rows, cachedRows.containers)
+        ) {
+            cachedRows.containers
+        } else {
+            val built = rows.map { row ->
+                val keyViews = row.map(::createKeyView).apply {
+                    // Batch apply fontset mappings for all key labels.
+                    forEach(::applyConfiguredFonts)
+                }
+                if (splitKeyboard) {
+                    buildSplitRow(row, keyViews)
+                } else {
+                    buildRegularRow(row, keyViews)
+                }
             }
-            if (splitKeyboard) {
-                buildSplitRow(row, keyViews)
-            } else {
-                buildRegularRow(row, keyViews)
-            }
+            reusableRowsCache[rowsSignature] = ReusableRows(rows, built)
+            built
         }
+        lastRowsSignature = rowsSignature
 
         val auxBarConfig = auxBarConfig
         if (auxBarConfig != null && auxBarConfig.position != AuxBarPosition.AbovePreedit) {
@@ -902,6 +1025,16 @@ abstract class BaseKeyboard(
     }
 
     /**
+     * Drop all cached row sets. Call before a reload that must rebuild rows even though
+     * the layout/style signature did not change (e.g. font set refresh whose flag was
+     * already consumed).
+     */
+    fun clearReusableRowsCache() {
+        reusableRowsCache.clear()
+        lastRowsSignature = null
+    }
+
+    /**
      * Lightweight style refresh, updates colors without rebuilding layout
      */
     fun refreshStyleLight() {
@@ -977,7 +1110,7 @@ abstract class BaseKeyboard(
         }.apply {
             setTextScale(currentTextScale)
             soundEffect = soundEffectFor(def, activeAppearance)
-            if (def is SpaceKey) {
+            if (def is SpaceKey || def is MiniSpaceKey) {
                 spaceKeys.add(this)
                 swipeEnabled = spaceSwipeMoveCursor.getValue()
                 swipeRepeatEnabled = true
@@ -1143,6 +1276,11 @@ abstract class BaseKeyboard(
     open fun onCompositionStateChanged(composing: Boolean) {
         if (this.composing == composing) return
         this.composing = composing
+        // The attached rows are about to be mutated in place (compose-aware views get
+        // recreated). Evict the cache entry holding them so a later reload can never
+        // reuse rows that were modified under a different composition state.
+        lastRowsSignature?.let { reusableRowsCache.remove(it) }
+        lastRowsSignature = null
         data class PendingUpdate(
             val item: ComposeAwareKey,
             val activeDef: KeyDef,
@@ -1839,25 +1977,47 @@ abstract class BaseKeyboard(
         }
     }
 
-    private fun transformMotionEventToChild(
-        child: View,
+    /**
+     * HashMap of [PointerId (Int)][MotionEvent.getPointerId] to [TouchTarget]
+     * for custom touch event dispatching
+     */
+    private fun releaseAllTouchTargets() {
+        touchTargets.forEach {
+            it.value.view.cancelGestures()
+        }
+        touchTargets.clear()
+    }
+
+    private fun findTouchTarget(event: MotionEvent, pointerIndex: Int): TouchTarget? {
+        updateBounds()
+        val x = event.getX(pointerIndex).roundToInt() + bounds.left
+        val y = event.getY(pointerIndex).roundToInt() + bounds.top
+        val key = keyRows.asSequence()
+            .flatMap { it.children }
+            .filterIsInstance<KeyView>()
+            .find { it.isEnabled && it.bounds.contains(x, y) }
+            ?: return null
+        return TouchTarget(key)
+    }
+
+    private fun dispatchMotionEventToTarget(
         event: MotionEvent,
         action: Int,
-        pointerIndex: Int
-    ): MotionEvent {
-        if (child !is KeyView) {
-            Timber.w("child view is not KeyView when transforming MotionEvent $event")
-            return event
+        pointerIndex: Int,
+        target: TouchTarget
+    ) {
+        val childLocationInWindow = intArrayOf(0, 0).also {
+            target.view.getLocationInWindow(it)
         }
-        val (childWindowX, childWindowY) = childLocationInWindow.also { child.getLocationInWindow(it) }
-        val childX = event.getX(pointerIndex) + bounds.left - childWindowX
-        val childY = event.getY(pointerIndex) + bounds.top - childWindowY
-        return MotionEvent.obtain(
+        val childX = event.getX(pointerIndex) + bounds.left - childLocationInWindow[0]
+        val childY = event.getY(pointerIndex) + bounds.top - childLocationInWindow[1]
+        val e = MotionEvent.obtain(
             event.downTime, event.eventTime, action,
             childX, childY, event.getPressure(pointerIndex), event.getSize(pointerIndex),
             event.metaState, event.xPrecision, event.yPrecision,
             event.deviceId, event.edgeFlags
         )
+        target.view.dispatchTouchEvent(e)
     }
 
     override fun onInterceptTouchEvent(ev: MotionEvent): Boolean {
@@ -1878,59 +2038,50 @@ abstract class BaseKeyboard(
         if (vivoKeypressWorkaround) {
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
-                    val target = findTargetChild(event.x, event.y) ?: return false
-                    touchTarget[event.getPointerId(0)] = target
-                    target.dispatchTouchEvent(
-                        transformMotionEventToChild(target, event, MotionEvent.ACTION_DOWN, 0)
-                    )
+                    releaseAllTouchTargets()
+                    val pid = event.getPointerId(0)
+                    val target = findTouchTarget(event, 0) ?: return false
+                    touchTargets[pid] = target
+                    dispatchMotionEventToTarget(event, MotionEvent.ACTION_DOWN, 0, target)
                     return true
                 }
                 MotionEvent.ACTION_POINTER_DOWN -> {
                     val i = event.actionIndex
-                    val target = findTargetChild(event.getX(i), event.getY(i)) ?: return false
-                    touchTarget[event.getPointerId(i)] = target
-                    target.dispatchTouchEvent(
-                        transformMotionEventToChild(target, event, MotionEvent.ACTION_DOWN, i)
-                    )
+                    val pid = event.getPointerId(i)
+                    val target = findTouchTarget(event, i) ?: return true
+                    touchTargets[pid] = target
+                    dispatchMotionEventToTarget(event, MotionEvent.ACTION_DOWN, i, target)
                     return true
                 }
                 MotionEvent.ACTION_MOVE -> {
                     for (i in 0 until event.pointerCount) {
-                        val target = touchTarget[event.getPointerId(i)] ?: continue
-                        target.dispatchTouchEvent(
-                            transformMotionEventToChild(target, event, MotionEvent.ACTION_MOVE, i)
-                        )
+                        val pid = event.getPointerId(i)
+                        val target = touchTargets[pid] ?: continue
+                        dispatchMotionEventToTarget(event, MotionEvent.ACTION_MOVE, i, target)
                     }
-                    return true
-                }
-                MotionEvent.ACTION_UP -> {
-                    val i = event.actionIndex
-                    val pid = event.getPointerId(i)
-                    val target = touchTarget[event.getPointerId(i)] ?: return false
-                    target.dispatchTouchEvent(
-                        transformMotionEventToChild(target, event, MotionEvent.ACTION_UP, i)
-                    )
-                    touchTarget.remove(pid)
                     return true
                 }
                 MotionEvent.ACTION_POINTER_UP -> {
                     val i = event.actionIndex
                     val pid = event.getPointerId(i)
-                    val target = touchTarget[event.getPointerId(i)] ?: return false
-                    target.dispatchTouchEvent(
-                        transformMotionEventToChild(target, event, MotionEvent.ACTION_UP, i)
-                    )
-                    touchTarget.remove(pid)
+                    val target = touchTargets[pid] ?: return true
+                    dispatchMotionEventToTarget(event, MotionEvent.ACTION_UP, i, target)
+                    touchTargets.remove(pid)
+                    return true
+                }
+                MotionEvent.ACTION_UP -> {
+                    val pid = event.getPointerId(0)
+                    val target = touchTargets[pid]
+                    if (target == null) {
+                        releaseAllTouchTargets()
+                        return true
+                    }
+                    dispatchMotionEventToTarget(event, MotionEvent.ACTION_UP, 0, target)
+                    touchTargets.remove(pid)
                     return true
                 }
                 MotionEvent.ACTION_CANCEL -> {
-                    val i = event.actionIndex
-                    val pid = event.getPointerId(i)
-                    val target = touchTarget[pid] ?: return false
-                    target.dispatchTouchEvent(
-                        transformMotionEventToChild(target, event, MotionEvent.ACTION_CANCEL, i)
-                    )
-                    touchTarget.remove(pid)
+                    releaseAllTouchTargets()
                     return true
                 }
             }
@@ -2639,7 +2790,7 @@ abstract class BaseKeyboard(
     }
 
     open fun onDetach() {
-        // do nothing by default
+        releaseAllTouchTargets()
     }
 
 }

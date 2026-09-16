@@ -573,12 +573,26 @@ class TextPickerSwitchKey(
     )
 )
 
-class MiniSpaceKey : KeyDef(
+class MiniSpaceKey(
+    percentWidth: Float = 0.15f,
+    textColor: Int? = null,
+    textColorMonet: String? = null,
+    backgroundColor: Int? = null,
+    backgroundColorMonet: String? = null,
+    shadowColor: Int? = null,
+    shadowColorMonet: String? = null
+) : KeyDef(
     Appearance.Image(
         src = R.drawable.ic_baseline_space_bar_24,
-        percentWidth = 0.15f,
+        percentWidth = percentWidth,
         variant = Variant.Alternative,
-        viewId = R.id.button_mini_space
+        viewId = R.id.button_mini_space,
+        textColor = textColor,
+        textColorMonet = textColorMonet,
+        backgroundColor = backgroundColor,
+        backgroundColorMonet = backgroundColorMonet,
+        shadowColor = shadowColor,
+        shadowColorMonet = shadowColorMonet
     ),
     setOf(
         Behavior.Press(KeyAction.SymAction(KeySym(FcitxKeyMapping.FcitxKey_space)))
@@ -591,13 +605,25 @@ class NumPadKey(
     val sym: Int,
     textSize: Float = 16f,
     percentWidth: Float = 0.1f,
-    variant: Variant = Variant.Normal
+    variant: Variant = Variant.Normal,
+    textColor: Int? = null,
+    textColorMonet: String? = null,
+    backgroundColor: Int? = null,
+    backgroundColorMonet: String? = null,
+    shadowColor: Int? = null,
+    shadowColorMonet: String? = null
 ) : KeyDef(
     Appearance.Text(
         displayText,
         textSize = textSize,
         percentWidth = percentWidth,
-        variant = variant
+        variant = variant,
+        textColor = textColor,
+        textColorMonet = textColorMonet,
+        backgroundColor = backgroundColor,
+        backgroundColorMonet = backgroundColorMonet,
+        shadowColor = shadowColor,
+        shadowColorMonet = shadowColorMonet
     ),
     setOf(
         Behavior.Press(KeyAction.SymAction(KeySym(sym), NumLockState))
@@ -830,7 +856,8 @@ class MacroKey(
                     is MacroStep.Edit -> step.action.isNotBlank()
                     is MacroStep.AppAction -> step.id.isNotBlank()
                     is MacroStep.Shortcut -> true
-                    is MacroStep.LayerSwitch -> step.target.isNotBlank()
+                    is MacroStep.LayerSwitch ->
+                        step.mode == KeyAction.LayerSwitchMode.BACK || step.target.isNotBlank()
                 }
             }
         }

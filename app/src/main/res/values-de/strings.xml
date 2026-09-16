@@ -50,6 +50,7 @@
     <string name="import_">Importieren</string>
     <string name="synced">Synchronisiert!</string>
     <string name="loading">Wird geladen</string>
+    <string name="qr_image_decode_progress">QR-Code %1$d von %2$d wird decodiert…</string>
     <string name="clipboard_listening">Clipboard zeigen</string>
     <string name="clipboard_limit">Anzahl Clipboard Verlauf</string>
     <string name="clipboard_enable">Zwischenablage aktivieren</string>
@@ -258,6 +259,9 @@
     <string name="text_keyboard_layout_key_color_monet_unavailable">Monet-Dynamikfarbe nicht verfügbar</string>
     <string name="text_keyboard_layout_layout_name">Layoutname</string>
     <string name="text_keyboard_layout_layout_name_hint">z. B.: rime, pinyin</string>
+    <string name="numeric_layout_override_title">Tastaturlayout für Zahlenfelder</string>
+    <string name="numeric_layout_override_builtin">Integrierter Ziffernblock</string>
+    <string name="numeric_layout_override_unavailable">%1$s (im aktuellen Profil nicht verfügbar)</string>
     <string name="text_keyboard_layout_copy_from">Aus bestehendem Layout kopieren</string>
     <string name="text_keyboard_layout_name_empty">Layoutname darf nicht leer sein</string>
     <string name="text_keyboard_layout_delete_key_confirm">Diese Taste löschen?</string>
@@ -279,10 +283,17 @@
     <string name="text_keyboard_layout_macro_event_preview">%1$s → … (insgesamt %2$d Schritte)</string>
     <string name="text_keyboard_layout_alt_label">Alternatives Etikett</string>
     <string name="text_keyboard_layout_swipe_label">Wisch-Label</string>
+    <string name="text_keyboard_layout_switch_target">Ziel</string>
+    <string name="text_keyboard_layout_switch_target_default">Standard (?123 / letztes Symbol-Layout)</string>
+    <string name="text_keyboard_layout_switch_target_text">Texttastatur</string>
+    <string name="text_keyboard_layout_switch_target_number">Zifferntastatur</string>
+    <string name="text_keyboard_layout_switch_target_symbol">Symbolauswahl</string>
+    <string name="text_keyboard_layout_numpad_symbol">Ziffernblock-Symbol</string>
     <string name="text_keyboard_layout_display_value_hint">Anzeigewert</string>
     <string name="text_keyboard_layout_key_label_caps">Caps</string>
     <string name="text_keyboard_layout_key_label_lang">Lang</string>
     <string name="text_keyboard_layout_key_label_space">Space</string>
+    <string name="text_keyboard_layout_key_label_minispace">␣</string>
     <string name="text_keyboard_layout_key_label_enter">Enter</string>
     <string name="text_keyboard_layout_alphabet_key_main_required">Hauptzeichen darf nicht leer sein</string>
     <string name="text_keyboard_layout_alphabet_key_alt_required">Alternatives Zeichen darf nicht leer sein</string>
@@ -363,6 +374,7 @@
     <string name="automatic">Automatisch</string>
     <string name="horizontal">Horizontal</string>
     <string name="vertical">Vertikal</string>
+    <string name="vertical_reversed">Vertikal (umgekehrt)</string>
     <string name="always">Immer</string>
     <string name="candidates_position">Position des Kandidatenfensters</string>
     <string name="top_left">Oben links</string>
@@ -399,6 +411,7 @@
     <string name="macro_editor_step_type_layer">Ebenenwechsel</string>
     <string name="macro_editor_step_type_to">Zu Ebene wechseln</string>
     <string name="macro_editor_step_type_osl">One-Shot-Ebene</string>
+    <string name="macro_editor_step_type_back">Zurück zur vorherigen Ebene</string>
     <string name="macro_editor_step_type_down">Taste drücken</string>
     <string name="macro_editor_step_type_up">Taste loslassen</string>
     <string name="macro_editor_step_type_text">Text eingeben</string>

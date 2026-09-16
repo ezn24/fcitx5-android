@@ -50,6 +50,7 @@
     <string name="import_">インポート</string>
     <string name="synced">同期完了!</string>
     <string name="loading">ロード中</string>
+    <string name="qr_image_decode_progress">QR コード %1$d/%2$d をデコード中…</string>
     <string name="clipboard_listening">クリップボードリスニング</string>
     <string name="clipboard_limit">クリップボード履歴の制限</string>
     <string name="clipboard_enable">クリップボードを有効にする</string>
@@ -355,6 +356,9 @@
     <string name="text_keyboard_layout_key_color_monet_unavailable">Monet の動的色は利用できません</string>
     <string name="text_keyboard_layout_layout_name">レイアウト名</string>
     <string name="text_keyboard_layout_layout_name_hint">例：rime、pinyin</string>
+    <string name="numeric_layout_override_title">数字入力のキーボードレイアウト</string>
+    <string name="numeric_layout_override_builtin">内蔵の数字キーボード</string>
+    <string name="numeric_layout_override_unavailable">%1$s（現在のプロファイルでは利用できません）</string>
     <string name="text_keyboard_layout_copy_from">既存レイアウトからコピー</string>
     <string name="text_keyboard_layout_name_empty">レイアウト名は空にできません</string>
     <string name="text_keyboard_layout_delete_key_confirm">このキーを削除しますか？</string>
@@ -376,10 +380,17 @@
     <string name="text_keyboard_layout_macro_event_preview">%1$s → … (全 %2$d ステップ)</string>
     <string name="text_keyboard_layout_alt_label">代替ラベル</string>
     <string name="text_keyboard_layout_swipe_label">スワイプラベル</string>
+    <string name="text_keyboard_layout_switch_target">ターゲット</string>
+    <string name="text_keyboard_layout_switch_target_default">デフォルト（?123 / 前回の記号レイアウト）</string>
+    <string name="text_keyboard_layout_switch_target_text">テキストキーボード</string>
+    <string name="text_keyboard_layout_switch_target_number">数字キーボード</string>
+    <string name="text_keyboard_layout_switch_target_symbol">記号ピッカー</string>
+    <string name="text_keyboard_layout_numpad_symbol">テンキー記号</string>
     <string name="text_keyboard_layout_display_value_hint">表示値</string>
     <string name="text_keyboard_layout_key_label_caps">Caps</string>
     <string name="text_keyboard_layout_key_label_lang">Lang</string>
     <string name="text_keyboard_layout_key_label_space">Space</string>
+    <string name="text_keyboard_layout_key_label_minispace">␣</string>
     <string name="text_keyboard_layout_key_label_enter">Enter</string>
     <string name="space_key_label_mode">スペースキーのラベル表示</string>
     <string name="space_key_label_mode_default">デフォルト</string>
@@ -460,6 +471,7 @@
     <string name="automatic">自動</string>
     <string name="horizontal">横</string>
     <string name="vertical">縦</string>
+    <string name="vertical_reversed">縦（逆順）</string>
     <string name="always">常に</string>
     <string name="candidates_position">候補ウィンドウの位置</string>
     <string name="top_left">左上</string>
@@ -496,6 +508,7 @@
     <string name="macro_editor_step_type_layer">レイヤー切替</string>
     <string name="macro_editor_step_type_to">レイヤーへ切替</string>
     <string name="macro_editor_step_type_osl">ワンショットレイヤー</string>
+    <string name="macro_editor_step_type_back">前のレイヤーに戻る</string>
     <string name="macro_editor_step_type_down">キーを押す</string>
     <string name="macro_editor_step_type_up">キーを離す</string>
     <string name="macro_editor_step_type_text">テキストを入力</string>

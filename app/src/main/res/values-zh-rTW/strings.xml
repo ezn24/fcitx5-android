@@ -53,6 +53,7 @@
     <string name="import_">匯入</string>
     <string name="synced">已同步！</string>
     <string name="loading">正在載入</string>
+    <string name="qr_image_decode_progress">正在解碼 QR 碼 %1$d/%2$d…</string>
     <string name="clipboard_listening">監聽剪貼簿</string>
     <string name="clipboard_limit">剪貼簿歷史紀錄限制</string>
     <string name="clipboard_enable">啟用剪貼簿</string>
@@ -369,6 +370,7 @@
     <string name="automatic">自動</string>
     <string name="horizontal">橫向</string>
     <string name="vertical">豎向</string>
+    <string name="vertical_reversed">豎向倒序</string>
     <string name="always">始終</string>
     <string name="candidates_position">候選窗口位置</string>
     <string name="top_left">左上</string>
@@ -505,6 +507,9 @@
     <string name="text_keyboard_layout_key_color_monet_unavailable">Monet 動態顏色目前不可用</string>
     <string name="text_keyboard_layout_layout_name">佈局名稱</string>
     <string name="text_keyboard_layout_layout_name_hint">例如：rime、pinyin</string>
+    <string name="numeric_layout_override_title">數字鍵盤佈局</string>
+    <string name="numeric_layout_override_builtin">內建數字鍵盤</string>
+    <string name="numeric_layout_override_unavailable">%1$s（目前設定中不可用）</string>
     <string name="text_keyboard_layout_layout_name_exists">佈局名稱已存在</string>
     <string name="text_keyboard_layout_copy_from">從現有佈局複製</string>
     <string name="text_keyboard_layout_name_empty">佈局名稱不能為空</string>
@@ -522,6 +527,7 @@
     <string name="text_keyboard_layout_key_label_caps">Caps</string>
     <string name="text_keyboard_layout_key_label_lang">Lang</string>
     <string name="text_keyboard_layout_key_label_space">Space</string>
+    <string name="text_keyboard_layout_key_label_minispace">␣</string>
     <string name="text_keyboard_layout_key_label_enter">Enter</string>
     <string name="text_keyboard_layout_alphabet_key_main_required">主字元不能為空</string>
     <string name="text_keyboard_layout_alphabet_key_alt_required">副字元不能為空</string>
@@ -637,6 +643,12 @@
     <string name="text_keyboard_layout_macro_event_preview">%1$s → … (共 %2$d 步)</string>
     <string name="text_keyboard_layout_alt_label">副標籤</string>
     <string name="text_keyboard_layout_swipe_label">劃動標籤</string>
+    <string name="text_keyboard_layout_switch_target">目標</string>
+    <string name="text_keyboard_layout_switch_target_default">預設（?123 / 上次符號佈局）</string>
+    <string name="text_keyboard_layout_switch_target_text">文字鍵盤</string>
+    <string name="text_keyboard_layout_switch_target_number">數字鍵盤</string>
+    <string name="text_keyboard_layout_switch_target_symbol">符號選擇器</string>
+    <string name="text_keyboard_layout_numpad_symbol">數字鍵盤符號</string>
 
     <!-- Macro Editor -->
     <string name="macro_editor_title">編輯 %1$s</string>
@@ -648,6 +660,7 @@
     <string name="macro_editor_step_type_layer">切層動作</string>
     <string name="macro_editor_step_type_to">切換到層</string>
     <string name="macro_editor_step_type_osl">單次層</string>
+    <string name="macro_editor_step_type_back">返回上一個圖層</string>
     <string name="macro_editor_step_type_down">按下按鍵</string>
     <string name="macro_editor_step_type_up">釋放按鍵</string>
     <string name="macro_editor_step_type_text">輸入文字</string>
@@ -836,7 +849,7 @@
     <string name="icon_theme_keyboard_keys">鍵盤按鍵</string>
     <string name="icon_theme_toolbar_buttons">工具列按鈕</string>
     <string name="icon_theme_system_buttons">系統按鈕</string>
-    <string name="icon_theme_customized">%s（%d 個已自訂）</string>
+    <string name="icon_theme_customized">%1$s（%2$d 個已自訂）</string>
     <string name="icon_theme_builtin_ref">內建圖示：</string>
     <string name="icon_theme_builtin_short">內建</string>
     <string name="icon_theme_custom_resource">自訂</string>

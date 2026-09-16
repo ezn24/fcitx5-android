@@ -42,6 +42,7 @@
     <string name="whether_import_dict">¿Quiere importar este diccionario?</string>
     <string name="import_">Importar</string>
     <string name="loading">Cargando</string>
+    <string name="qr_image_decode_progress">Decodificando código QR %1$d de %2$d…</string>
     <string name="about">Acerca de</string>
     <string name="faq">Preguntas frecuentes</string>
     <string name="current_version">Versión actual</string>
@@ -209,6 +210,9 @@
     <string name="text_keyboard_layout_key_color_monet_unavailable">Color dinámico de Monet no disponible</string>
     <string name="text_keyboard_layout_layout_name">Nombre de la distribución</string>
     <string name="text_keyboard_layout_layout_name_hint">p. ej., rime, pinyin</string>
+    <string name="numeric_layout_override_title">Diseño de teclado numérico</string>
+    <string name="numeric_layout_override_builtin">Teclado numérico integrado</string>
+    <string name="numeric_layout_override_unavailable">%1$s (no disponible en el perfil actual)</string>
     <string name="text_keyboard_layout_copy_from">Copiar de una distribución existente</string>
     <string name="text_keyboard_layout_name_empty">El nombre de la distribución no puede estar vacío</string>
     <string name="text_keyboard_layout_delete_key_confirm">¿Eliminar esta tecla?</string>
@@ -224,6 +228,7 @@
     <string name="text_keyboard_layout_key_label_caps">Caps</string>
     <string name="text_keyboard_layout_key_label_lang">Lang</string>
     <string name="text_keyboard_layout_key_label_space">Space</string>
+    <string name="text_keyboard_layout_key_label_minispace">␣</string>
     <string name="text_keyboard_layout_key_label_enter">Enter</string>
     <string name="space_key_label_mode">Estilo de etiqueta de la barra espaciadora</string>
     <string name="space_key_label_mode_default">Predeterminado</string>
@@ -307,6 +312,7 @@
     <string name="automatic">Automático</string>
     <string name="horizontal">Horizontal</string>
     <string name="vertical">Vertical</string>
+    <string name="vertical_reversed">Vertical (invertido)</string>
     <string name="always">Siempre</string>
     <string name="candidates_position">Posición de la ventana de candidatos</string>
     <string name="top_left">Arriba izquierda</string>
@@ -344,6 +350,12 @@
     <string name="text_keyboard_layout_macro_event_preview">%1$s → … (%2$d pasos en total)</string>
     <string name="text_keyboard_layout_alt_label">Etiqueta alternativa</string>
     <string name="text_keyboard_layout_swipe_label">Etiqueta de deslizamiento</string>
+    <string name="text_keyboard_layout_switch_target">Destino</string>
+    <string name="text_keyboard_layout_switch_target_default">Predeterminado (?123 / último diseño de símbolos)</string>
+    <string name="text_keyboard_layout_switch_target_text">Teclado de texto</string>
+    <string name="text_keyboard_layout_switch_target_number">Teclado numérico</string>
+    <string name="text_keyboard_layout_switch_target_symbol">Selector de símbolos</string>
+    <string name="text_keyboard_layout_numpad_symbol">Símbolo del teclado numérico</string>
 
     <!-- Macro Editor -->
     <string name="macro_editor_title">Editar %1$s</string>
@@ -355,6 +367,7 @@
     <string name="macro_editor_step_type_layer">Cambio de capa</string>
     <string name="macro_editor_step_type_to">Ir a capa</string>
     <string name="macro_editor_step_type_osl">Capa de un solo uso</string>
+    <string name="macro_editor_step_type_back">Volver a la capa anterior</string>
     <string name="macro_editor_step_type_down">Presionar tecla</string>
     <string name="macro_editor_step_type_up">Soltar tecla</string>
     <string name="macro_editor_step_type_text">Introducir texto</string>
