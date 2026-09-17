@@ -69,6 +69,8 @@ jobs:
 
       - name: Setup Android environment
         uses: android-actions/setup-android@v4
+        with:
+          packages: platform-tools
 
       - name: Install CMake
         run: |

@@ -49,7 +49,7 @@ jobs:
           mv $GITHUB_WORKSPACE/fdroidserver $fdroidserver 
 
           rm -rf $ANDROID_HOME/tools
-          sdkmanager "tools" "platform-tools"
+          sdkmanager "platform-tools"
           git -C $home_vagrant/gradlew-fdroid pull
           for d in logs tmp unsigned $home_vagrant/metadata $home_vagrant/.android $home_vagrant/.gradle $ANDROID_HOME; do
               test -d $d || mkdir $d;
