@@ -17,10 +17,5 @@ git checkout -- .
 git apply ../../../../../../plugin/rime/src/main/cpp/fcitx5-rime/fcitx5-alt-trigger-v4point1.patch || echo "fcitx5 patch already applied or failed"
 popd
 
-# update prebuilt
-echo "updating prebuilt"
-pushd lib/fcitx5/src/main/cpp/prebuilt
-git remote add gh https://github.com/fxliang/prebuilt.git || git remote set-url gh https://github.com/fxliang/prebuilt.git
-git fetch -v gh master
-git checkout gh/master
-popd
+# Keep the official prebuilt revision pinned by the repository's submodule.
+# The archived FX prebuilt lacks dependencies required by current native sources.

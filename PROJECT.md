@@ -54,3 +54,4 @@
 
 - 主要本機驗證命令：`./gradlew.bat :app:assembleFxDebug`
 - 發行簽章資料不得寫入版本庫或本文件。
+- CI 的個人化準備腳本不得把官方 `prebuilt` 子模組切回已歸檔的 FX 版本；依賴以版本庫鎖定的官方提交為準，避免缺失 `nlohmann_json` 等套件。
