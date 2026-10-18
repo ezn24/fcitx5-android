@@ -110,3 +110,5 @@ lint/tmp/
 .kotlin/
 
 .vscode/settings.json
+tools/.emoji-cache/
+tools/.emoji-deps/

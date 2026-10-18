@@ -1,0 +1,8 @@
+{
+    "uniqueId": "unicode-org/cldr-emoji",
+    "artifactVersion": "48",
+    "description": "Emoji names and search keywords (Traditional Chinese, Simplified Chinese, English)",
+    "name": "Unicode CLDR Emoji Annotations",
+    "website": "https://github.com/unicode-org/cldr",
+    "licenses": ["Unicode-3.0"]
+}

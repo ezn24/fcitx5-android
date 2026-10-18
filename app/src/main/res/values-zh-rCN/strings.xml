@@ -900,4 +900,9 @@
     <string name="icon_theme_import_dialog_title">导入图标主题</string>
     <string name="icon_theme_overwrite_confirm">覆盖已存在的图标主题 \"%s\"？</string>
     <string name="icon_theme_new">新建</string>
+    <string name="emoji_search">搜索表情</string>
+    <string name="emoji_search_back">返回表情</string>
+    <string name="emoji_search_clear">清空搜索</string>
+    <string name="emoji_search_no_results">没有匹配的表情</string>
+    <string name="emoji_search_unavailable">表情搜索暂不可用</string>
 </resources>

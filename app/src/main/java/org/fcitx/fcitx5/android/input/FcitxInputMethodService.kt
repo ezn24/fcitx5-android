@@ -39,6 +39,8 @@ import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InlineSuggestionsRequest
 import android.view.inputmethod.InlineSuggestionsResponse
 import android.view.inputmethod.InputMethodSubtype
+import android.view.inputmethod.InputConnection
+import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.inline.InlinePresentationSpec
 import androidx.annotation.Keep
@@ -57,9 +59,11 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.consumeEach
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.yield
 import org.fcitx.fcitx5.android.R
 import org.fcitx.fcitx5.android.BuildConfig
 import org.fcitx.fcitx5.android.core.CapabilityFlags
+import org.fcitx.fcitx5.android.core.CapabilityFlag
 import org.fcitx.fcitx5.android.core.FcitxAPI
 import org.fcitx.fcitx5.android.core.FcitxEvent
 import org.fcitx.fcitx5.android.core.FcitxKeyMapping
@@ -265,6 +269,82 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
 
     private val composing = CursorRange()
     private var composingText = FormattedText.Empty
+
+    private class EmojiSearchInput(
+        val editor: EditText,
+        val connection: InputConnection,
+        val generation: Int,
+        var originalStart: Int,
+        var originalEnd: Int
+    ) {
+        var closing = false
+        var discarded = false
+    }
+
+    private var emojiSearchInput: EmojiSearchInput? = null
+
+    override fun getCurrentInputConnection(): InputConnection? =
+        emojiSearchInput?.connection ?: super.getCurrentInputConnection()
+
+    fun beginEmojiSearchInput(editor: EditText, onReady: () -> Unit): Job = lifecycleScope.launch {
+        val generation = inputSessionGeneration
+        finishComposing()
+        postFcitxJob { reset() }.join()
+        yield()
+        if (generation != inputSessionGeneration || !editor.isAttachedToWindow) return@launch
+        val info = EditorInfo().apply {
+            inputType = InputType.TYPE_CLASS_TEXT
+            imeOptions = EditorInfo.IME_ACTION_SEARCH or EditorInfo.IME_FLAG_NO_EXTRACT_UI or
+                EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING
+        }
+        val connection = editor.onCreateInputConnection(info)
+            ?: object : android.view.inputmethod.BaseInputConnection(editor, true) {
+                override fun getEditable(): android.text.Editable = editor.editableText
+            }
+        emojiSearchInput = EmojiSearchInput(
+            editor, connection, generation, selection.latest.start, selection.latest.end
+        )
+        // Search is a plain text client, independent of URI/password/ASCII restrictions in the app.
+        val flags = CapabilityFlags(
+            CapabilityFlag.Preedit, CapabilityFlag.ClientUnfocusCommit,
+            CapabilityFlag.CommitStringWithCursor, CapabilityFlag.Sensitive
+        )
+        postFcitxJob {
+            setCapFlags(flags)
+            focus(true)
+        }.join()
+        if (emojiSearchInput?.editor !== editor || !editor.isAttachedToWindow) return@launch
+        onReady()
+    }
+
+    fun endEmojiSearchInput(editor: EditText, onFinished: () -> Unit = {}): Job = lifecycleScope.launch {
+        val search = emojiSearchInput?.takeIf { it.editor === editor } ?: run {
+            onFinished()
+            return@launch
+        }
+        if (search.closing) return@launch
+        search.closing = true
+        // Keep routing to the local editor until queued engine commits have drained.
+        postFcitxJob {
+            reset()
+            setCapFlags(capabilityFlags)
+        }.join()
+        yield()
+        if (emojiSearchInput !== search) return@launch
+        emojiSearchInput = null
+        if (search.generation == inputSessionGeneration) {
+            resetComposingState()
+            selection.resetTo(search.originalStart, search.originalEnd)
+            if (!search.discarded) onFinished()
+        }
+    }
+
+    private fun discardEmojiSearchInput() {
+        val search = emojiSearchInput ?: return
+        search.discarded = true
+        if (search.closing) return
+        endEmojiSearchInput(search.editor)
+    }
 
     private fun resetComposingState() {
         composing.clear()
@@ -672,6 +752,14 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
     }
 
     private fun handleDeleteSurrounding(before: Int, after: Int) {
+        emojiSearchInput?.let {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                it.connection.deleteSurroundingTextInCodePoints(before, after)
+            } else {
+                it.connection.deleteSurroundingText(before, after)
+            }
+            return
+        }
         val ic = currentInputConnection ?: return
         if (before > 0) {
             selection.predictOffset(-before)
@@ -688,6 +776,13 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
     }
 
     fun handleBackspaceDirectly() {
+        emojiSearchInput?.let {
+            val editor = it.editor
+            if (editor.selectionStart != editor.selectionEnd) it.connection.commitText("", 1)
+            else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) it.connection.deleteSurroundingTextInCodePoints(1, 0)
+            else editor.dispatchKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DEL))
+            return
+        }
         val ic = currentInputConnection ?: return
         val editorInfo = currentInputEditorInfo
         val isTypeNull = editorInfo.inputType and InputType.TYPE_MASK_CLASS == InputType.TYPE_NULL
@@ -721,6 +816,7 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
     }
 
     private fun handleReturnKey() {
+        if (emojiSearchInput != null) return
         val ic = currentInputConnection ?: run {
             sendDownUpKeyEvents(KeyEvent.KEYCODE_ENTER)
             return
@@ -771,6 +867,11 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
     }
 
     fun commitText(text: String, cursor: Int = -1) {
+        emojiSearchInput?.let {
+            if (it.closing) return
+            it.connection.commitText(text, 1)
+            return
+        }
         val ic = currentInputConnection ?: return
         // when composing text equals commit content, finish composing text as-is
         if (composing.isNotEmpty() && composingText.toString() == text) {
@@ -917,6 +1018,10 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
     }
 
     fun deleteSelection() {
+        emojiSearchInput?.let {
+            if (it.editor.selectionStart != it.editor.selectionEnd) it.connection.commitText("", 1)
+            return
+        }
         val lastSelection = selection.latest
         if (lastSelection.isEmpty()) return
         selection.predict(lastSelection.start)
@@ -945,6 +1050,12 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
     }
 
     fun applySelectionOffset(offsetStart: Int, offsetEnd: Int = 0) {
+        emojiSearchInput?.let {
+            val start = (it.editor.selectionStart + offsetStart).coerceIn(0, it.editor.length())
+            val end = (it.editor.selectionEnd + offsetEnd).coerceIn(0, it.editor.length())
+            if (start <= end) it.connection.setSelection(start, end)
+            return
+        }
         val lastSelection = selection.latest
         currentInputConnection?.also {
             val start = max(lastSelection.start + offsetStart, 0)
@@ -956,6 +1067,11 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
     }
 
     fun cancelSelection() {
+        emojiSearchInput?.let {
+            val end = it.editor.selectionEnd
+            it.connection.setSelection(end, end)
+            return
+        }
         val lastSelection = selection.latest
         if (lastSelection.isEmpty()) return
         val end = lastSelection.end
@@ -1493,6 +1609,7 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
     }
 
     override fun onStartInput(attribute: EditorInfo, restarting: Boolean) {
+        discardEmojiSearchInput()
         android.util.Log.i("FcitxColdStart", "service.onStartInput restarting=$restarting")
         isInInputLifecycleCriticalPhase = true
         try {
@@ -1582,6 +1699,11 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
         candidatesStart: Int,
         candidatesEnd: Int
     ) {
+        emojiSearchInput?.let {
+            it.originalStart = newSelStart
+            it.originalEnd = newSelEnd
+            return
+        }
         // onUpdateSelection can left behind when user types quickly enough, eg. long press backspace
         cursorUpdateIndex += 1
         Timber.d("onUpdateSelection: old=[$oldSelStart,$oldSelEnd] new=[$newSelStart,$newSelEnd] cand=[$candidatesStart,$candidatesEnd]")
@@ -1733,6 +1855,10 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
     // because of https://android.googlesource.com/platform/frameworks/base.git/+/refs/tags/android-11.0.0_r45/core/java/android/view/inputmethod/BaseInputConnection.java#851
     // it's not possible to set cursor inside composing text
     private fun updateComposingText(text: FormattedText) {
+        emojiSearchInput?.let {
+            if (!it.closing) it.connection.setComposingText(text.toSpannedString(highlightColor), 1)
+            return
+        }
         val ic = currentInputConnection ?: return
         val lastSelection = selection.latest
         ic.beginBatchEdit()
@@ -1789,6 +1915,10 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
      * Also updates internal composing state of [FcitxInputMethodService].
      */
     fun finishComposing() {
+        emojiSearchInput?.let {
+            it.connection.finishComposingText()
+            return
+        }
         val ic = currentInputConnection ?: return
         if (composing.isEmpty()) return
         composing.clear()
@@ -1861,6 +1991,7 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
     }
 
     override fun onFinishInputView(finishingInput: Boolean) {
+        discardEmojiSearchInput()
         Timber.d("onFinishInputView: finishingInput=$finishingInput")
         MainService.stopSyncService(this)
         if (VoiceInputProviderManager.isActive()) {
@@ -1882,6 +2013,7 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
     }
 
     override fun onFinishInput() {
+        discardEmojiSearchInput()
         Timber.d("onFinishInput")
         MainService.stopSyncService(this)
         val inputSessionGeneration = this.inputSessionGeneration

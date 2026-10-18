@@ -1,0 +1,10 @@
+{
+    "uniqueId": "PoomSmart/EmojiLibrary",
+    "artifactVersion": "024c39fcabaa936804aaaef92e89b28a47def5db",
+    "description": "iOS-oriented emoji picker categories and ordering",
+    "name": "PoomSmart/EmojiLibrary",
+    "website": "https://github.com/PoomSmart/EmojiLibrary",
+    "licenses": [
+        "MIT"
+    ]
+}

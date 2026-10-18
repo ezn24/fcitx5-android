@@ -902,4 +902,9 @@
     <string name="voice_error_audio_construct">AudioRecord construct denied: %s</string>
     <string name="voice_error_audio_not_init">AudioRecord not initialized</string>
     <string name="voice_error_audio_start_failed">startRecording failed: %s</string>
+    <string name="emoji_search">Search emoji</string>
+    <string name="emoji_search_back">Back to emoji</string>
+    <string name="emoji_search_clear">Clear search</string>
+    <string name="emoji_search_no_results">No matching emoji</string>
+    <string name="emoji_search_unavailable">Emoji search unavailable</string>
 </resources>

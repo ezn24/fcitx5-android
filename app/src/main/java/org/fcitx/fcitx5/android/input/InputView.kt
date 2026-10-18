@@ -73,6 +73,7 @@ import org.fcitx.fcitx5.android.input.keyboard.KeyboardHeightPercentBase.Display
 import org.fcitx.fcitx5.android.input.keyboard.KeyboardHeightPercentBase.RealSize
 import org.fcitx.fcitx5.android.input.keyboard.KeyboardWindow
 import org.fcitx.fcitx5.android.input.picker.PickerWindow
+import org.fcitx.fcitx5.android.input.picker.EmojiSearchWindow
 import org.fcitx.fcitx5.android.input.picker.emojiPicker
 import org.fcitx.fcitx5.android.input.picker.emoticonPicker
 import org.fcitx.fcitx5.android.input.picker.symbolPicker
@@ -2722,6 +2723,7 @@ class InputView(
         val keyboard = windowManager.getEssentialWindow(KeyboardWindow) as? KeyboardWindow
         return when (windowManager.currentWindowOrNull()) {
             is PickerWindow -> keyboard?.companionKeyboardHeightPxOverride()
+            is EmojiSearchWindow -> keyboard?.companionKeyboardHeightPxOverride()
             is KeyboardWindow -> keyboard?.companionKeyboardHeightPxOverride()
                 ?.takeIf { keyboard.usesCompanionKeyboardHeightOverride() }
             else -> null
@@ -2731,7 +2733,8 @@ class InputView(
     private fun resolveEffectiveKeyboardHeightPercent(): Float {
         val globalPercent = (if (isLayoutLandscape) keyboardHeightPercentLandscape else keyboardHeightPercent).getValue()
         val keyboard = windowManager.getEssentialWindow(KeyboardWindow) as? KeyboardWindow
-        val companionPercent = if (windowManager.currentWindowOrNull() is PickerWindow) {
+        val currentWindow = windowManager.currentWindowOrNull()
+        val companionPercent = if (currentWindow is PickerWindow || currentWindow is EmojiSearchWindow) {
             keyboard?.companionKeyboardHeightPercentOverride()
         } else {
             null
@@ -3104,11 +3107,12 @@ class InputView(
                 windowManager.currentWindowOrNull() is KeyboardWindow &&
                 !isAdjustingMode &&
                 !isButtonsAdjustingOverlayVisible
+        val searchExtraHeight = (windowManager.currentWindowOrNull() as? EmojiSearchWindow)?.extraHeightPx ?: 0
         val targetHeight = when {
             collapseKeyboardWindow -> 1
             isEffectiveFloating -> resolveFloatingHeight()
             else -> keyboardHeightPx
-        }
+        } + searchExtraHeight
         windowManager.view.visibility = if (collapseKeyboardWindow) INVISIBLE else VISIBLE
         windowManager.view.updateLayoutParams {
             height = targetHeight

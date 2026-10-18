@@ -30,7 +30,27 @@
 - 保留提供給 Samsung／One UI 使用者的系統鍵盤音效選項與按鍵類型音效分類。
 - 一般功能設計需避免每次按鍵讀檔、同步磁碟寫入或不必要的全量重建，以控制延遲、記憶體與耗電。
 
-## 驗證
+## Emoji 表維護
+
+- Emoji 面板的分類及順序參考 `PoomSmart/EmojiLibrary`，使用固定來源提交，並轉換為 Unicode Emoji 17.0 的標準序列。
+- 更新清單：`python tools/update_emoji_picker.py`；核對清單：`python tools/update_emoji_picker.py --check`。只有維護腳本需要連網，鍵盤執行時使用內建 Kotlin 陣列。
+- 來源授權記錄於 `app/licenses/libraries/emojilibrary.json`，完整 MIT 聲明隨應用打包於 `app/src/main/assets/licenses/EmojiLibrary.txt`。
+- 這是參考來源的 iOS 排序，不宣稱已逐項核對最新 iOS；保留目前分頁、最近使用、膚色選擇及系統字型渲染。
+- 長按只顯示目前 emoji 的膚色，不跨性別擴展。兔耳舞者、摔跤者與芭蕾舞者補充 Emoji 17.0 的標準序列識別；仍依字型實際顯示能力過濾。
+
+## Emoji 搜尋與拼音資料
+
+- Emoji 分類列的搜尋按鈕開啟鍵盤內的搜尋欄；支援繁中、簡中、英文名稱／關鍵字，以及既有和使用者自訂拼音對應。搜尋結果可長按選膚色，選中後只將 emoji 送入原應用。
+- 搜尋時保留完整鍵盤高度，另加搜尋欄 40dp 與結果列 48dp；退出搜尋即恢復，不改寫使用者的高度設定。初始化期間按鍵保持可見，但在搜尋輸入接管完成前攔截觸控。
+- 搜尋頁直接掛載既有 KeyboardWindow 的鍵盤視圖，不重建另一套按鍵；地球鍵、長按空格切換輸入法、數字／自訂配置等沿用原有操作和使用者設定。退出搜尋會歸還視圖並恢復回車圖示。搜尋輸入不繼承原應用網址／密碼欄的限制，保留中文組字能力並停用個人化學習。
+- CLDR 48 資料固定在提交 `acd6d88ae493633240e19a87a721076a8a75c310`；執行時離線，索引首次搜尋才背景載入並快取，查詢防抖 100ms。
+- 準備維護依賴：`python -m pip install --target tools/.emoji-deps -r tools/requirements-emoji.txt`。
+- 生成／核對：`python tools/update_emoji_search.py`／`python tools/update_emoji_search.py --check`。下載快取及生成用依賴均不提交，也不打包進 APK。
+- 預設拼音 emoji 詞典保留舊行及其權重，只追加 CLDR 精確中文名稱的缺失對應，新增權重為 `0.1`；不把全部寬泛關鍵字加入拼音候選。
+- 已編輯的使用者字典仍整份優先於預設字典，不自動插入新增預設詞條；搜尋重新開啟時讀取目前的自訂對應，並取代舊預設拼音別名。
+- CLDR 完整授權隨應用打包於 `app/src/main/assets/licenses/CLDR.txt`。
+
+## 建置
 
 - 主要本機驗證命令：`./gradlew.bat :app:assembleFxDebug`
 - 發行簽章資料不得寫入版本庫或本文件。

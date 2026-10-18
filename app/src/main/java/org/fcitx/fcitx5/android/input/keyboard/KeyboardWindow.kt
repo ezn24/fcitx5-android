@@ -220,6 +220,21 @@ class KeyboardWindow : InputWindow.SimpleInputWindow<KeyboardWindow>(), Essentia
         }
     }
 
+    internal fun attachForEmojiSearch(host: FrameLayout) {
+        check(keyboardView.parent == null) { "Keyboard is already attached" }
+        host.addView(keyboardView, FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT
+        ))
+        onAttached()
+        currentKeyboard?.onReturnDrawableUpdate(R.drawable.ic_baseline_search_24)
+    }
+
+    internal fun detachFromEmojiSearch(host: FrameLayout) {
+        onDetached()
+        host.removeView(keyboardView)
+        reapplyReturnKeyDrawable()
+    }
+
     private fun attachLayout(target: String) {
         currentKeyboardName = target
         getOrCreateKeyboard(target)?.let {

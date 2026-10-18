@@ -52,6 +52,11 @@ class PickerWindow(
 
     private lateinit var pickerLayout: PickerLayout
     private lateinit var pickerPagesAdapter: PickerPagesAdapter
+    private var emojiBarExtension: android.view.View? = null
+
+    internal fun insertRecent(text: String) {
+        pickerPagesAdapter.insertRecent(text)
+    }
 
     private val iconThemeListener = IconThemeManager.OnIconThemeChangeListener {
         returnKeyDrawable.onIconThemeChanged()
@@ -159,7 +164,23 @@ class PickerWindow(
         }
     }
 
-    override fun onCreateBarExtension() = pickerLayout.tabsUi.root
+    override fun onCreateBarExtension(): android.view.View {
+        if (key != Key.Emoji) return pickerLayout.tabsUi.root
+        return emojiBarExtension ?: android.widget.LinearLayout(context).apply {
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            addView(pickerLayout.tabsUi.root, android.widget.LinearLayout.LayoutParams(0, -1, 1f))
+            addView(android.widget.ImageButton(context).apply {
+                setImageResource(org.fcitx.fcitx5.android.R.drawable.ic_baseline_search_24)
+                imageTintList = android.content.res.ColorStateList.valueOf(theme.keyTextColor)
+                setBackgroundColor(android.graphics.Color.TRANSPARENT)
+                contentDescription = context.getString(org.fcitx.fcitx5.android.R.string.emoji_search)
+                androidx.appcompat.widget.TooltipCompat.setTooltipText(this, contentDescription)
+                setOnClickListener { windowManager.attachWindow(EmojiSearchWindow()) }
+            }, android.widget.LinearLayout.LayoutParams(
+                (40 * resources.displayMetrics.density).toInt(), -1
+            ))
+        }.also { emojiBarExtension = it }
+    }
 
     override fun onAttached() {
         IconThemeManager.addOnChangedListener(iconThemeListener)
