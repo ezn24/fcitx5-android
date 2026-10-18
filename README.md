@@ -1,7 +1,8 @@
+https://github.com/PoomSmart/EmojiLibrary/blob/main/PSEmojiUtilities%2BEmoji.m
 # fcitx5-android-ez
 
-以 [FX](https://github.com/fxliang/fcitx5-android) 分支基础进行开发，会融入上游的更新
-全程由Codex编写代码，修改增加了一些特性  
+以 [FX](https://github.com/fxliang/fcitx5-android) 分支基础进行开发，会融入FX以及官方版本的更新
+全程由Codex编写代码修改增加特性
 
 包名为了方便改成了`org.fcitx.fcitx5.android.ez`
 
@@ -18,16 +19,17 @@
     - 权重机制：权重越高，就会出现在越前面
     - 预设联想数量：因为自带联想词库庞大，所以默认只会显示权重前10高的短语，用户也可以在设置里自定
     - 自定联想：
-      - 新增需要输入想要添加的短语比如 your mum  
+      - 新增需要输入想要添加的短语比如 your mum
         稍等片刻底列出目前相关联想权重前10高的短语
         用户可以根据需求调整短语的权重
     - 联想权重学习：会根据用户的使用频率调整权重
-- 拉取最新 Unicode emoji (部分多人emoji没有放入)
-- 改进拼音输入 emoji 的触发 & 添加自定拼音emoji字典的编辑
+- 拉取最新 [Unicode emoji](https://unicode.org/emoji/charts/full-emoji-list.html) 并且基于 [EmojiLibrary](https://github.com/PoomSmart/EmojiLibrary/blob/main/PSEmojiUtilities%2BEmoji.m) 尽可能地贴近 iOS 键盘的 emoji 布局
+- 改进拼音输入 emoji 的触发 & 添加自定拼音 emoji 字典的编辑
 - 新增为三星用户设计的音效开关，开启可启用三星键盘的音效
 - 工具栏新增简繁体切换按钮
+- 新增 emoji 搜索栏，基于 [Unicode CLDR](https://github.com/unicode-org/cldr/tree/main/common/annotationsDerived) 以及本机的 emoji 字典作为索引
+# 构建
 
-## 构建
 主要输出路径:
 `app/build/outputs/apk/fx/<buildType>`
 
@@ -118,9 +120,11 @@ In case you want Fcitx5 on other platforms: [macOS](https://github.com/fcitx-con
 
 ## Screenshots
 
-|                                         拼音, Material Light theme, key border enabled                                          |                                        自然码双拼, Pixel Dark theme, key border disabled                                        |
+
+|                                         拼音, Material Light theme, key border enabled                                         |                                        自然码双拼, Pixel Dark theme, key border disabled                                        |
 | :-----------------------------------------------------------------------------------------------------------------------------: | :-----------------------------------------------------------------------------------------------------------------------------: |
 | <img src="https://github.com/fcitx5-android/fcitx5-android/assets/13914967/bd429247-62d9-4c78-bab8-70ef3ce47588" width="360px"> | <img src="https://github.com/fcitx5-android/fcitx5-android/assets/13914967/3ae969c1-7ed0-4f92-a5df-19dc8c90a8c3" width="360px"> |
+
 
 |                                       Emoji picker, Pixel Light theme, key border enabled                                       |                                     Symbol picker, Material Dark theme, key border disabled                                     |
 | :-----------------------------------------------------------------------------------------------------------------------------: | :-----------------------------------------------------------------------------------------------------------------------------: |
@@ -149,7 +153,6 @@ Discuss on Telegram: [@fcitx5_android_group](https://t.me/fcitx5_android_group) 
 <summary>Prerequisites for Windows</summary>
 
 - Enable [Developer Mode](https://learn.microsoft.com/en-us/windows/apps/get-started/enable-your-device-for-development) so that symlinks can be created without administrator privilege.
-
 - Enable symlink support for `git`:
 
   ```shell
@@ -207,7 +210,6 @@ The current recommended versions are recorded in [Versions.kt](build-logic/conve
 - Android Studio indexing takes forever to complete and cosumes a lot of memory.
 
   Switch to "Project" view in the "Project" tool window (namely the file tree side bar), right click `lib/fcitx5/src/main/cpp/prebuilt` directory, then select "Mark Directory as > Excluded". You may also need to restart the IDE to interrupt ongoing indexing process.
-
 - Gradle error: "No variants found for ':app'. Check build files to ensure at least one variant exists." or "[CXX1210] <whatever>/CMakeLists.txt debug|arm64-v8a : No compatible library found"
 
   Examine if there are environment variables set such as `_JAVA_OPTIONS` or `JAVA_TOOL_OPTIONS`. You might want to clear them (maybe in the startup script `studio.sh` of Android Studio), as some gradle plugin treats anything in stderr as errors and aborts.
