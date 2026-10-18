@@ -1,21 +1,19 @@
-#!/usr/bin/bash
+#!/usr/bin/env bash
+set -euo pipefail
 
-# update fcitx5-rime
-echo "updating fcitx5-rime"
-pushd plugin/rime/src/main/cpp/fcitx5-rime
-git remote add gh https://github.com/fxliang/fcitx5-rime.git || git remote set-url gh https://github.com/fxliang/fcitx5-rime.git
-git fetch -v gh master
-git checkout gh/master
-popd
-sed -i 's|/fcitx/|/fxliang/|g' plugin/rime/licenses/libraries/fcitx5-rime.json
+cd -- "$(dirname -- "${BASH_SOURCE[0]}")"
 
-# apply fcitx5 patch from fcitx5-rime
-echo "applying fcitx5 patch"
-pushd lib/fcitx5/src/main/cpp/fcitx5
-# reset to clean state first
-git checkout -- .
-git apply ../../../../../../plugin/rime/src/main/cpp/fcitx5-rime/fcitx5-alt-trigger-v4point1.patch || echo "fcitx5 patch already applied or failed"
-popd
-
-# Keep the official prebuilt revision pinned by the repository's submodule.
-# The archived FX prebuilt lacks dependencies required by current native sources.
+# Keep native sources and binary dependencies paired with the checked-in revisions.
+# Mixing FX Rime sources with official librime requires unavailable extension APIs.
+for path in \
+    lib/fcitx5/src/main/cpp/fcitx5 \
+    lib/fcitx5/src/main/cpp/prebuilt \
+    plugin/rime/src/main/cpp/fcitx5-rime; do
+    expected=$(git rev-parse "HEAD:$path")
+    actual=$(git -C "$path" rev-parse HEAD)
+    if [[ "$actual" != "$expected" ]]; then
+        echo "Unexpected submodule revision: $path (expected $expected, got $actual)" >&2
+        exit 1
+    fi
+    echo "Using pinned revision $actual: $path"
+done
