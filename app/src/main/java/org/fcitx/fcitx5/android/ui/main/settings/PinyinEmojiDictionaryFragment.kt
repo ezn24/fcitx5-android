@@ -9,6 +9,8 @@ import android.view.View
 import android.view.inputmethod.EditorInfo
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
+import androidx.core.widget.doAfterTextChanged
+import com.google.android.material.textfield.TextInputLayout
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.launch
@@ -19,6 +21,7 @@ import org.fcitx.fcitx5.android.daemon.FcitxDaemon
 import org.fcitx.fcitx5.android.data.pinyin.PinyinDictManager
 import org.fcitx.fcitx5.android.data.pinyin.PinyinEmojiDictionaryData
 import org.fcitx.fcitx5.android.data.pinyin.PinyinEmojiDictionaryEntry
+import org.fcitx.fcitx5.android.data.pinyin.EmojiPinyinConverter
 import org.fcitx.fcitx5.android.ui.common.BaseDynamicListUi
 import org.fcitx.fcitx5.android.ui.common.OnItemChangedListener
 import org.fcitx.fcitx5.android.ui.main.EditDeleteMenuProvider
@@ -38,11 +41,14 @@ class PinyinEmojiDictionaryFragment :
     OnItemChangedListener<PinyinEmojiDictionaryEntry> {
 
     private lateinit var ui: BaseDynamicListUi<PinyinEmojiDictionaryEntry>
+    private lateinit var pinyinConverter: EmojiPinyinConverter
 
     private val dustman = NaiveDustman<PinyinEmojiDictionaryEntry>()
 
     override suspend fun initialize(): View {
+        val assets = requireContext().assets
         val initialEntries = withContext(Dispatchers.IO) {
+            pinyinConverter = EmojiPinyinConverter.load(assets.open("emoji/hanzi-pinyin.bin"))
             PinyinDictManager.loadEmojiDictionaryData()
         }
         ui = object : BaseDynamicListUi<PinyinEmojiDictionaryEntry>(
@@ -68,11 +74,28 @@ class PinyinEmojiDictionaryFragment :
                     imeOptions = EditorInfo.IME_ACTION_NEXT
                 }
                 val (codeLayout, codeField) = materialTextInput {
-                    setHint(R.string.pinyin_emoji_dict_code)
+                    setHint(R.string.pinyin_emoji_dict_input)
                 }
                 codeField.apply {
                     isSingleLine = true
                     imeOptions = EditorInfo.IME_ACTION_NEXT
+                    doAfterTextChanged { text ->
+                        val input = text.toString()
+                        val converted = pinyinConverter.convert(input)
+                        codeLayout.helperText = converted?.takeIf { it != input.trim() }
+                        codeLayout.endIconMode = if (codeLayout.helperText != null)
+                            TextInputLayout.END_ICON_CUSTOM else TextInputLayout.END_ICON_NONE
+                        if (codeLayout.helperText != null) {
+                            codeLayout.setEndIconDrawable(R.drawable.ic_baseline_edit_24)
+                            codeLayout.endIconContentDescription = getString(R.string.pinyin_emoji_dict_edit_pinyin)
+                            codeLayout.setEndIconOnClickListener {
+                                codeField.setText(converted)
+                                codeField.setSelection(codeField.length())
+                                codeField.requestFocus()
+                            }
+                        }
+                        codeField.error = null
+                    }
                 }
                 val (weightLayout, weightField) = materialTextInput {
                     setHint(R.string.pinyin_emoji_dict_weight)
@@ -110,19 +133,16 @@ class PinyinEmojiDictionaryFragment :
                         }
                         emojiField.error = null
 
-                        val code = codeField.str.trim()
-                        if (code.isBlank()) {
-                            codeField.error = getString(
-                                R.string._cannot_be_empty,
-                                getString(R.string.pinyin_emoji_dict_code)
-                            )
+                        val code = pinyinConverter.convert(codeField.str)
+                        if (code == null) {
+                            codeField.error = getString(R.string.pinyin_emoji_dict_invalid_input)
                             codeField.requestFocus()
                             return@onClick false
                         }
                         codeField.error = null
 
                         val weight = weightField.str.trim()
-                        if (weight.isNotBlank() && weight.toDoubleOrNull() == null) {
+                        if (weight.isNotBlank() && weight.toDoubleOrNull()?.isFinite() != true) {
                             weightField.error = getString(R.string.pinyin_emoji_dict_invalid_weight)
                             weightField.requestFocus()
                             return@onClick false

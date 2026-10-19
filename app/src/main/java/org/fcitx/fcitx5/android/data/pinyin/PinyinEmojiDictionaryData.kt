@@ -20,9 +20,11 @@ data class PinyinEmojiDictionaryEntry(
     }
 
     companion object {
+        private val whitespace = Regex("\\s+")
+
         fun fromLine(line: String): PinyinEmojiDictionaryEntry? {
             if (line.isBlank() || line.startsWith("#")) return null
-            val fields = line.split('\t')
+            val fields = line.trim().split(whitespace, limit = 4)
             if (fields.size < 2) return null
             val emoji = fields[0].trim()
             val code = fields[1].trim()

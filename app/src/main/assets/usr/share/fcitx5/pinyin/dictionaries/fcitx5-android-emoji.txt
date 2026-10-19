@@ -2470,6 +2470,55 @@
 🪎	zhu'bao	0.3
 🫪   beng'jing	0.3
 
+# Imported aliases from user-supplied emoji dictionaries
+♥️	ai'xing	0.3
+♥️	hong'xing	0.3
+🎉	gong'xi	0.3
+🎉	qing'zhu	0.3
+🎊	gong'xi	0.3
+🎊	qing'zhu	0.3
+👀	yan'jing	0.3
+👊🏻	quan'tou	0.3
+👋🏻	bai	0.3
+👌🏻	hao	0.3
+👌🏻	hou	0.3
+👍🏻	hao	0.3
+👍🏻	zan	0.3
+💪🏻	jia'you	0
+💪🏻	zhuang	0.3
+🖕🏻	cao'ni'ma	0.3
+🖕🏻	diu	0.3
+😈	xie'e	0.3
+😠	qi'si	0.3
+😡	qi'si	0.3
+😤	qi'si	0.3
+😤	sheng'qi	0.3
+😵	yun	0.3
+🙂	wu'yu	0.3
+🙃	wu'yu	0.3
+🙏🏻	duo'xie	0.3
+🙏🏻	gan'xie	0.3
+🙏🏻	xie	0.3
+🙏🏻	xie'xie	0.3
+🤌🏻	hao	0.3
+🤌🏻	hou	0.3
+🤦🏻‍♂️	wu'yu	0.3
+🤧	shang'xing	0
+🤬	qi'si	0.3
+🤬	sheng'qi	0.3
+🤯	zheng'jing	0.3
+🥲	ku'si	0.3
+🥲	liu'lei	0.3
+🥲	xiang'ku	0.3
+🥳	gong'xi	0.3
+🥹	ku'si	0.3
+🥹	liu'lei	0.3
+🥹	xiang'ku	0.3
+🧠	nao	0.3
+🫠	wu'yu	0.3
+🫡	shou'dao	0.3
+🫡	zun'ming	0.3
+
 # CLDR 48 generated names (tools/update_emoji_search.py)
 ‼️	shuang'gan'tan'hao	0.1
 ‼️	shuang'jing'tan'hao	0.1

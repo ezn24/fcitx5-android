@@ -1,0 +1,8 @@
+{
+    "uniqueId": "mozillazg/python-pinyin-data",
+    "artifactVersion": "0.55.0",
+    "description": "Hanzi readings used by the Chinese emoji dictionary editor",
+    "name": "pypinyin data",
+    "website": "https://github.com/mozillazg/python-pinyin",
+    "licenses": ["MIT"]
+}

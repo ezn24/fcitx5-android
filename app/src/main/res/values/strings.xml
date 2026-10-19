@@ -503,6 +503,9 @@
     <string name="pinyin_emoji_dict_summary">Edit emoji candidates shown from Pinyin input</string>
     <string name="pinyin_emoji_dict_emoji">Emoji</string>
     <string name="pinyin_emoji_dict_code">Pinyin</string>
+    <string name="pinyin_emoji_dict_input">Chinese or Pinyin</string>
+    <string name="pinyin_emoji_dict_edit_pinyin">Edit Pinyin</string>
+    <string name="pinyin_emoji_dict_invalid_input">Enter supported Chinese characters or full Pinyin separated by apostrophes</string>
     <string name="pinyin_emoji_dict_weight">Weight</string>
     <string name="pinyin_emoji_dict_invalid_weight">Weight must be a number</string>
     <string name="english_word_list">English word suggestions</string>

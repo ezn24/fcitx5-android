@@ -27,6 +27,15 @@ class EmojiSearchIndexTest {
     ))
 
     @Test
+    fun bundledSearchIncludesImportedDictionaryAliases() {
+        val bundled = File("src/main/assets/emoji/search.tsv").bufferedReader().use {
+            EmojiSearchIndex.fromLines(it.lineSequence())
+        }
+        assertTrue(bundled.search("gong'xi", 100).contains("🎉"))
+        assertTrue(bundled.search("shou'dao", 100).contains("🫡"))
+    }
+
+    @Test
     fun searchesBothChineseScriptsEnglishAndPinyin() {
         for (query in listOf("消防員", "消防员", "FIREFIGHTER", "ｆｉｒｅｆｉｇｈｔｅｒ", "xiao fang yuan", "xiao'fang'yuan", "xiaofangyuan")) {
             assertEquals(query, listOf("👩‍🚒"), index().search(query))

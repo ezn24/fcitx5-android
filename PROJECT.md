@@ -49,6 +49,9 @@
 - 預設拼音 emoji 詞典保留舊行及其權重，只追加 CLDR 精確中文名稱的缺失對應，新增權重為 `0.1`；不把全部寬泛關鍵字加入拼音候選。
 - 已編輯的使用者字典仍整份優先於預設字典，不自動插入新增預設詞條；搜尋重新開啟時讀取目前的自訂對應，並取代舊預設拼音別名。
 - CLDR 完整授權隨應用打包於 `app/src/main/assets/licenses/CLDR.txt`。
+- 中文 emoji 詞庫新增／編輯接受中文或完整拼音，顯示自動生成的拼音；點編輯圖示可修正多音字。保存格式仍為 emoji、拼音及權重，不改動原生詞典格式。
+- 離線漢字讀音使用固定的 `pypinyin==0.55.0` 資料，僅在詞庫管理頁於背景載入緊湊陣列，不在按鍵流程讀檔。生成／核對：`python tools/update_emoji_pinyin.py`／`python tools/update_emoji_pinyin.py --check`，依賴與搜尋維護腳本共用。授權見 `app/src/main/assets/licenses/PinyinData.txt`。
+- 已合併使用者提供的兩份 emoji 二進位詞典之 47 組缺失對應，保留所有既有詞條及權重。現有使用者自訂詞庫仍優先，不因內建資料更新而覆寫。
 
 ## 建置
 

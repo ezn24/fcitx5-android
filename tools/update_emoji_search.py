@@ -62,12 +62,13 @@ def build():
                 if target is names and locale != "en" and re.fullmatch(r"[\u3400-\u9fff]{2,12}", text):
                     chinese_names[emoji].add(text)
 
-    original = DICTIONARY.read_text(encoding="utf-8").split(MARKER, 1)[0].rstrip() + "\n"
+    original, _, generated = DICTIONARY.read_text(encoding="utf-8").partition(MARKER)
+    original = original.rstrip() + "\n"
     existing = set()
     for line in original.splitlines():
         if line.startswith("#"):
             continue
-        fields = line.split("\t")
+        fields = line.split(maxsplit=2)
         if len(fields) < 2:
             continue
         emoji, code = key(fields[0]), fields[1]
@@ -75,7 +76,12 @@ def build():
         if emoji in emojis:
             legacy_codes[emoji].add(code)
 
-    supplemental = []
+    # Retain previously shipped rows and weights, including older tone variants.
+    supplemental = [line for line in generated.splitlines() if line.strip() and not line.startswith("#")]
+    for line in supplemental:
+        fields = line.split()
+        if len(fields) >= 2:
+            existing.add((key(fields[0]), fields[1]))
     for emoji, labels in chinese_names.items():
         for label in sorted(labels):
             syllables = lazy_pinyin(label, errors=lambda text: list(text))

@@ -491,6 +491,9 @@
     <string name="pinyin_emoji_dict_summary">编辑拼音输入中显示的 Emoji 候选</string>
     <string name="pinyin_emoji_dict_emoji">Emoji</string>
     <string name="pinyin_emoji_dict_code">拼音</string>
+    <string name="pinyin_emoji_dict_input">中文或拼音</string>
+    <string name="pinyin_emoji_dict_edit_pinyin">修改拼音</string>
+    <string name="pinyin_emoji_dict_invalid_input">请输入可转换的汉字，或用单引号分隔的完整拼音</string>
     <string name="pinyin_emoji_dict_weight">权重</string>
     <string name="pinyin_emoji_dict_invalid_weight">权重必须是数字</string>
     <string name="english_word_list">自定义单词</string>
