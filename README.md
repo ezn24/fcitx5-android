@@ -1,4 +1,5 @@
 https://github.com/PoomSmart/EmojiLibrary/blob/main/PSEmojiUtilities%2BEmoji.m
+
 # fcitx5-android-ez
 
 以 [FX](https://github.com/fxliang/fcitx5-android) 分支基础进行开发，会融入FX以及官方版本的更新
@@ -12,9 +13,10 @@ https://github.com/PoomSmart/EmojiLibrary/blob/main/PSEmojiUtilities%2BEmoji.m
 ## 增加内容：
 
 - 英语输入法：
-  - 自定词典
-  - 自定字词功能
-  - 短语联想（本地自带来源于 [Tatoeba](https://downloads.tatoeba.org/exports/sentences.tar.bz2) 和 [Google Books Ngram](https://storage.googleapis.com/books/ngrams/books/20200217)）：
+  - 添加自定词典
+  - 添加自定字词功能
+  - 添加自定拼音 emoji 字典的编辑
+  - 添加短语联想（本地自带来源于 [Tatoeba](https://downloads.tatoeba.org/exports/sentences.tar.bz2) 和 [Google Books Ngram](https://storage.googleapis.com/books/ngrams/books/20200217)）：
     - 自定联想词库：用户可以自行寻找实用的联想词库
     - 权重机制：权重越高，就会出现在越前面
     - 预设联想数量：因为自带联想词库庞大，所以默认只会显示权重前10高的短语，用户也可以在设置里自定
@@ -24,10 +26,13 @@ https://github.com/PoomSmart/EmojiLibrary/blob/main/PSEmojiUtilities%2BEmoji.m
         用户可以根据需求调整短语的权重
     - 联想权重学习：会根据用户的使用频率调整权重
 - 拉取最新 [Unicode emoji](https://unicode.org/emoji/charts/full-emoji-list.html) 并且基于 [EmojiLibrary](https://github.com/PoomSmart/EmojiLibrary/blob/main/PSEmojiUtilities%2BEmoji.m) 尽可能地贴近 iOS 键盘的 emoji 布局
-- 改进拼音输入 emoji 的触发 & 添加自定拼音 emoji 字典的编辑
+- 改进拼音输入 emoji 的触发
+- 添加自定拼音 emoji 字典的编辑
 - 新增为三星用户设计的音效开关，开启可启用三星键盘的音效
 - 工具栏新增简繁体切换按钮
 - 新增 emoji 搜索栏，基于 [Unicode CLDR](https://github.com/unicode-org/cldr/tree/main/common/annotationsDerived) 以及本机的 emoji 字典作为索引
+- 改進 ⌈說點啥 Pro 聯動⌋ 讓其可偵測到使用者在指定（可自訂100-5000ms）的延遲內停止說話時停止錄音並提交錄音結果
+
 # 构建
 
 主要输出路径:

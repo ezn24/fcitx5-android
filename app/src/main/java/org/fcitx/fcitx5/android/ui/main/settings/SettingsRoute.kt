@@ -198,6 +198,9 @@ sealed class SettingsRoute : Parcelable {
     data object EnglishDictionaries : SettingsRoute()
 
     @Serializable
+    data object EnglishEmojiDict : SettingsRoute()
+
+    @Serializable
     data object EnglishPhraseBooks : SettingsRoute()
 
     @Serializable
@@ -306,6 +309,9 @@ sealed class SettingsRoute : Parcelable {
             }
             fragment<EnglishDictionaryFragment, EnglishDictionaries> {
                 label = ctx.getString(R.string.english_manage_dictionaries)
+            }
+            fragment<EnglishEmojiDictionaryFragment, EnglishEmojiDict> {
+                label = ctx.getString(R.string.english_emoji_dictionary)
             }
             fragment<EnglishPhraseBookFragment, EnglishPhraseBooks> {
                 label = ctx.getString(R.string.english_manage_phrase_books)

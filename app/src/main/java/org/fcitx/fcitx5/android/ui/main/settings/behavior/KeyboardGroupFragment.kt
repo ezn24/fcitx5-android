@@ -326,7 +326,7 @@ class KeyboardGroupFragment : ManagedPreferenceFragment(AppPrefs.getInstance().k
                 "inline_suggestions", "toolbar_num_row_on_password",
                 "horizontal_candidate_style", "expanded_candidate_style",
                 "expanded_candidate_grid_span_count_portrait",
-                "show_voice_input_button", "preferred_voice_input",
+                "show_voice_input_button", "preferred_voice_input", "voice_auto_stop_delay",
             ),
             GROUP_EDITORS to emptySet(),
         )

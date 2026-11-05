@@ -510,6 +510,11 @@
     <string name="english_import_dictionary">导入词库</string>
     <string name="english_imported_words">已导入 %1$d 个单词</string>
     <string name="english_manage_dictionaries">管理词典</string>
+    <string name="english_emoji_dictionary">英文 Emoji 词库</string>
+    <string name="english_emoji_keyword">英文关键词</string>
+    <string name="english_emoji_invalid_keyword">请输入 2 至 64 个字符的单个英文关键词</string>
+    <string name="english_emoji_invalid_value">请输入不含空格的 Emoji</string>
+    <string name="english_emoji_reset_confirm">要恢复默认英文 Emoji 词库并丢弃修改吗？</string>
     <string name="english_imported_phrases">已导入 %1$d 条短语</string>
     <string name="english_manage_phrase_books">管理联想词库</string>
     <string name="english_manage_custom_predictions">管理自定义联想</string>
@@ -812,6 +817,7 @@
     <string name="share_receive_archive_action_import_file">作为文件导入</string>
     <string name="share_receive_archive_extracted">已解压 %1$d 个文件到 %2$s。</string>
     <string name="preferred_voice_input">首选语音输入</string>
+    <string name="voice_auto_stop_delay">说点啥自动停止延迟</string>
     <string name="keyboard_height_percent_base">键盘高度百分比</string>
     <string name="display_metrics">显示指标 (Resources.getDisplayMetrics)</string>
     <string name="real_size">真实尺寸 (Display.getRealSize)</string>

@@ -458,6 +458,11 @@
     <string name="english_import_dictionary">匯入詞庫</string>
     <string name="english_imported_words">已匯入 %1$d 個單字</string>
     <string name="english_manage_dictionaries">管理詞典</string>
+    <string name="english_emoji_dictionary">英文 Emoji 詞庫</string>
+    <string name="english_emoji_keyword">英文關鍵字</string>
+    <string name="english_emoji_invalid_keyword">請輸入 2 至 64 個字元的單一英文關鍵字</string>
+    <string name="english_emoji_invalid_value">請輸入不含空白的 Emoji</string>
+    <string name="english_emoji_reset_confirm">要恢復預設英文 Emoji 詞庫並捨棄修改嗎？</string>
     <string name="english_imported_phrases">已匯入 %1$d 條短語</string>
     <string name="english_manage_phrase_books">管理聯想詞庫</string>
     <string name="english_manage_custom_predictions">管理自訂聯想</string>
@@ -633,6 +638,7 @@
     <string name="fontset_save_failed_permission_error">儲存字體集失敗：權限被拒絕</string>
     <string name="fontset_save_failed_unknown_error">儲存字體集失敗：%1$s</string>
     <string name="preferred_voice_input">首選語音輸入</string>
+    <string name="voice_auto_stop_delay">說點啥自動停止延遲</string>
 
     <!-- KeyEditorDialog -->
     <string name="text_keyboard_layout_macro_key_label_required">標籤不能為空</string>

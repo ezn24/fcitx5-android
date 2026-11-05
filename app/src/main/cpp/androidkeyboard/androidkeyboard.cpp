@@ -41,6 +41,42 @@ std::string asciiLower(std::string value) {
     return value;
 }
 
+std::unordered_map<std::string, std::vector<std::string>> loadEnglishEmojiKeywords() {
+    std::unordered_map<std::string, std::vector<std::string>> result;
+    auto read = [&result](const std::filesystem::path &path) {
+        std::ifstream file(path);
+        if (!file) {
+            return false;
+        }
+        for (std::string line; std::getline(file, line);) {
+            if (!line.empty() && line.back() == '\r') {
+                line.pop_back();
+            }
+            const auto tab = line.find('\t');
+            if (tab != std::string::npos && tab > 0 && tab + 1 < line.size()) {
+                result[line.substr(0, tab)].push_back(line.substr(tab + 1));
+            }
+        }
+        return true;
+    };
+    // An empty customized file intentionally disables every built-in mapping.
+    if (const char *home = std::getenv("FCITX_DATA_HOME")) {
+        if (read(std::filesystem::path(home) / "androidkeyboard/emoji_keywords.tsv")) {
+            return result;
+        }
+    }
+    if (const char *dirs = std::getenv("XDG_DATA_DIRS")) {
+        std::stringstream paths(dirs);
+        std::string dir;
+        while (std::getline(paths, dir, ':')) {
+            if (!dir.empty() && read(std::filesystem::path(dir) / "fcitx5/androidkeyboard/emoji_keywords.tsv")) {
+                break;
+            }
+        }
+    }
+    return result;
+}
+
 std::string trimWord(std::string line) {
     if (auto pos = line.find('#'); pos != std::string::npos) {
         line.resize(pos);
@@ -573,7 +609,23 @@ void AndroidKeyboardEngine::updateCandidate(const InputMethodEntry &entry, Input
     }
 
     int visibleCandidateCount = static_cast<int>(candidateList->totalSize());
+    const std::vector<std::string> *emojiResults = nullptr;
+    if (entry.languageCode() == "en" && userInput.size() >= 2) {
+        if (!englishEmojiKeywords_) {
+            englishEmojiKeywords_.emplace(loadEnglishEmojiKeywords());
+        }
+        const auto &keywords = *englishEmojiKeywords_;
+        if (const auto it = keywords.find(asciiLower(userInput)); it != keywords.end()) {
+            emojiResults = &it->second;
+        }
+    }
     auto appendPhraseAndWordResults = [&] {
+        if (emojiResults) {
+            for (const auto &emoji: *emojiResults) {
+                appendCandidate({emoji, emoji});
+            }
+            emojiResults = nullptr;
+        }
         for (auto &result: phraseResults) {
             appendCandidate(std::move(result));
         }

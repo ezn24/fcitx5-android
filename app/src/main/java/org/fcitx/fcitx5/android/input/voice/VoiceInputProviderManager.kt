@@ -27,6 +27,7 @@ import org.fcitx.fcitx5.android.BuildConfig
 import org.fcitx.fcitx5.android.common.ipc.IVoiceInputCallback
 import org.fcitx.fcitx5.android.common.ipc.IVoiceInputProvider
 import org.fcitx.fcitx5.android.common.ipc.VoiceInputIpc
+import org.fcitx.fcitx5.android.data.prefs.AppPrefs
 import org.fcitx.fcitx5.android.input.FcitxInputMethodService
 import org.fcitx.fcitx5.android.utils.appContext
 import timber.log.Timber
@@ -823,9 +824,45 @@ object VoiceInputProviderManager {
     private fun launchAudioFeedJob(
         service: FcitxInputMethodService,
         queue: Channel<QueuedAudio>,
-    ): Job = service.lifecycleScope.launch(Dispatchers.IO) {
+    ): Job {
+        val callback = activeCallback
+        val provider = activeProvider
+        val config = activeSessionConfig
+        val detectSpeechEnd = activeProviderId?.endsWith("FxliangFcitxVoiceInputProviderService") == true
+        val endpointDelayMs = if (detectSpeechEnd) {
+            AppPrefs.getInstance().keyboard.voiceAutoStopDelay.getValue().coerceIn(100, 5000).toLong()
+        } else null
+        return service.lifecycleScope.launch(Dispatchers.IO) {
+            var detector = if (endpointDelayMs != null) {
+                runCatching { VoiceEndpointDetector.create(config.audio.sampleRate, endpointDelayMs) }
+                    .onFailure { Timber.w(it, "Voice endpoint detection unavailable") }
+                    .getOrNull()
+            } else null
+            try {
+                feedAudioPackets(service, queue, provider, callback) { pcm ->
+                    val current = detector ?: return@feedAudioPackets false
+                    runCatching { current.accept(pcm) }.getOrElse {
+                        Timber.w(it, "Voice endpoint detection failed; keeping manual stop")
+                        detector = null
+                        runCatching { current.close() }
+                        false
+                    }
+                }
+            } finally {
+                detector?.let { runCatching { it.close() } }
+            }
+        }
+    }
+
+    private suspend fun feedAudioPackets(
+        service: FcitxInputMethodService,
+        queue: Channel<QueuedAudio>,
+        provider: IVoiceInputProvider?,
+        callback: IVoiceInputCallback?,
+        reachedEndpoint: (ByteArray) -> Boolean,
+    ) {
+        val currentProvider = provider ?: return
         for (packet in queue) {
-            val currentProvider = activeProvider ?: continue
             try {
                 currentProvider.feedAudio(
                     packet.pcm, 0, packet.pcm.size, packet.ptsMs,
@@ -835,11 +872,11 @@ object VoiceInputProviderManager {
                 // looping silently; surface via the callback so the UI clears
                 // its "listening" state and stopSession unwinds.
                 Timber.w(e, "feedAudio failed — provider gone, aborting session")
-                val cb = activeCallback
                 withContext(Dispatchers.Main) {
-                    if (cb != null) {
+                    if (activeAudioFeedQueue !== queue || activeCallback !== callback) return@withContext
+                    if (callback != null) {
                         runCatching {
-                            cb.onError(
+                            callback.onError(
                                 VoiceInputIpc.ErrorCodes.UNKNOWN,
                                 "Provider disconnected",
                             )
@@ -848,7 +885,17 @@ object VoiceInputProviderManager {
                         stopSession(service, keepConnectionWarm = false)
                     }
                 }
-                return@launch
+                return
+            }
+            if (reachedEndpoint(packet.pcm)) {
+                withContext(Dispatchers.Main) {
+                    if (activeAudioFeedQueue === queue && activeCallback === callback &&
+                        activeProvider === provider && sessionReady && !voiceSessionTerminalized
+                    ) {
+                        logI("voice endpoint detected; finishing session")
+                        finish(service)
+                    }
+                }
             }
         }
     }
@@ -926,13 +973,16 @@ object VoiceInputProviderManager {
 
         val queue = activeAudioFeedQueue
         val feedJob = activeAudioFeedJob
+        val callback = activeCallback
         val scope = (context as? FcitxInputMethodService)?.lifecycleScope
         if (queue != null && feedJob != null && scope != null) {
             scope.launch {
                 queue.close()
                 val drained = withTimeoutOrNull(FEED_DRAIN_TIMEOUT_MS) { feedJob.join() } != null
                 if (!drained) logW("feed queue drain timed out before endStream")
-                sendEndStream(context)
+                if (activeAudioFeedQueue === queue && activeCallback === callback && finishing) {
+                    sendEndStream(context)
+                }
             }
         } else {
             sendEndStream(context)

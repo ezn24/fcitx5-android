@@ -18,6 +18,8 @@ CLDR_REVISION = "acd6d88ae493633240e19a87a721076a8a75c310"  # CLDR 48
 ASSETS = ROOT / "app/src/main/assets"
 DICTIONARY = ASSETS / "usr/share/fcitx5/pinyin/dictionaries/fcitx5-android-emoji.txt"
 SEARCH = ASSETS / "emoji/search.tsv"
+ENGLISH = ASSETS / "usr/share/fcitx5/androidkeyboard/emoji_keywords.tsv"
+SHORTCODES = ASSETS / "usr/share/fcitx5/data/quickphrase.d/emoji-eac.mb"
 MARKER = "# CLDR 48 generated names (tools/update_emoji_search.py)"
 
 
@@ -104,12 +106,38 @@ def build():
     return search, dictionary, len(emojis), len(supplemental)
 
 
+def english_candidates(search):
+    matches = defaultdict(list)
+    rows = [line.split("\t") for line in search.splitlines() if line and not line.startswith("#")]
+    canonical = {key(row[0]): row[0] for row in rows}
+
+    def add(term, emoji):
+        word = term.lower()
+        if re.fullmatch(r"[a-z][a-z'-]{2,63}", word):
+            candidates = matches[word]
+            if len(candidates) < 2 and emoji not in candidates:
+                candidates.append(emoji)
+
+    for column in (1, 2):
+        if column == 2:
+            for line in SHORTCODES.read_text(encoding="utf-8").splitlines():
+                fields = line.split(maxsplit=1)
+                if len(fields) == 2 and fields[0].startswith(":") and fields[0].endswith(":"):
+                    if emoji := canonical.get(key(fields[1])):
+                        add(fields[0][1:-1], emoji)
+        for fields in rows:
+            for term in fields[column].split("|"):
+                add(term, fields[0])
+    return "".join(f"{word}\t{emoji}\n" for word in sorted(matches) for emoji in matches[word])
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--check", action="store_true")
     args = parser.parse_args()
     search, dictionary, count, added = build()
-    for path, content in ((SEARCH, search), (DICTIONARY, dictionary)):
+    for path, content in ((SEARCH, search), (DICTIONARY, dictionary),
+                          (ENGLISH, english_candidates(search))):
         if args.check:
             if not path.exists() or path.read_text(encoding="utf-8") != content:
                 raise SystemExit(f"Out of date: {path.relative_to(ROOT)}")

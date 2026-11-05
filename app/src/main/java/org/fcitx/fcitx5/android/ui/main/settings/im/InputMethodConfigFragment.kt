@@ -39,6 +39,9 @@ class InputMethodConfigFragment : FcitxPreferenceFragment() {
         ) {
             navigateWithAnim(SettingsRoute.EnglishDictionaries)
         }
+        screen.addPreference(R.string.english_emoji_dictionary) {
+            navigateWithAnim(SettingsRoute.EnglishEmojiDict)
+        }
         screen.addPreference(
             R.string.english_manage_phrase_books
         ) {

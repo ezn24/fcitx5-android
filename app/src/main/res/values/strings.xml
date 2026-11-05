@@ -522,6 +522,11 @@
     <string name="english_import_dictionary">Import word list</string>
     <string name="english_imported_words">Imported %1$d words</string>
     <string name="english_manage_dictionaries">Manage Dictionaries</string>
+    <string name="english_emoji_dictionary">English Emoji Dictionary</string>
+    <string name="english_emoji_keyword">English keyword</string>
+    <string name="english_emoji_invalid_keyword">Enter a single English keyword of 2–64 characters</string>
+    <string name="english_emoji_invalid_value">Enter an emoji without spaces</string>
+    <string name="english_emoji_reset_confirm">Restore the default English emoji dictionary and discard your changes?</string>
     <string name="english_imported_phrases">Imported %1$d phrases</string>
     <string name="english_manage_phrase_books">Manage Phrase Library</string>
     <string name="english_manage_custom_predictions">Manage Custom Predictions</string>
@@ -874,6 +879,7 @@
     <string name="share_receive_archive_action_import_file">Import as files</string>
     <string name="share_receive_archive_extracted">Extracted %1$d file(s) to %2$s.</string>
     <string name="preferred_voice_input">Preferred voice input</string>
+    <string name="voice_auto_stop_delay">BiBi voice input: silence delay</string>
     <string name="background_blur_radius">Background Blur Radius</string>
     <string name="no_blur">No Blur</string>
     <string name="edit_text_playground">EditText Playground</string>

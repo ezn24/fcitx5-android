@@ -232,6 +232,7 @@ dependencies {
     implementation(project(":lib:libime"))
     implementation(project(":lib:fcitx5-chinese-addons"))
     implementation(project(":lib:common"))
+    implementation("com.cloudflare.realtimekit.android-vad:webrtc:2.0.10-cf.3")
     implementation(libs.kotlinx.coroutines)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.androidx.activity)

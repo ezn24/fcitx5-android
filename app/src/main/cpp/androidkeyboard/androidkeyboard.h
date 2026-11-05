@@ -14,6 +14,7 @@
 #include <fcitx/action.h>
 #include <chrono>
 #include <filesystem>
+#include <optional>
 #include <unordered_map>
 #include <vector>
 
@@ -138,6 +139,7 @@ private:
     KeyList selectionKeys_;
     fcitx::SimpleAction wordHintAction_;
     std::vector<std::string> userWords_;
+    std::optional<std::unordered_map<std::string, std::vector<std::string>>> englishEmojiKeywords_;
     struct PhrasePrediction {
         std::string next;
         int score;
