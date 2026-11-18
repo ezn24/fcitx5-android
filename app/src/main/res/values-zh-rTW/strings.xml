@@ -285,6 +285,7 @@
     <string name="custom_label_hint">自定義標籤（可選）</string>
     <string name="enable_long_press_menu">啟用長按顯示浮動選單</string>
     <string name="floating_keyboard">浮動鍵盤</string>
+    <string name="allow_floating_keyboard_intent">允許其他應用程式控制浮動鍵盤</string>
     <string name="adjusting_mode_confirm">確認</string>
     <string name="edit_button_title">編輯按鈕</string>
     <string name="edit_button_label_id">識別碼</string>

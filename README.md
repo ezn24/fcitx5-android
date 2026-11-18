@@ -30,6 +30,7 @@ https://github.com/PoomSmart/EmojiLibrary/blob/main/PSEmojiUtilities%2BEmoji.m
 - 添加自定拼音 emoji 字典的编辑
 - 新增为三星用户设计的音效开关，开启可启用三星键盘的音效
 - 工具栏新增简繁体切换按钮
+- 浮動鍵盤支援 [Intent 控制開關](./FLOATING_KEYBOARD_INTENT.md)，可供 CarDeck 等外部應用聯動。
 - 新增 emoji 搜索栏，基于 [Unicode CLDR](https://github.com/unicode-org/cldr/tree/main/common/annotationsDerived) 以及本机的 emoji 字典作为索引
 - 改進 ⌈說點啥 Pro 聯動⌋ 讓其可偵測到使用者在指定（可自訂100-5000ms）的延遲內停止說話時停止錄音並提交錄音結果
 

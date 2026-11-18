@@ -333,6 +333,7 @@
     <string name="custom_label_hint">display name shown below icon</string>
     <string name="enable_long_press_menu">Enable long press to show floating menu</string>
     <string name="floating_keyboard">Floating Keyboard</string>
+    <string name="allow_floating_keyboard_intent">Allow other apps to control floating keyboard</string>
     <string name="adjusting_mode_confirm">Done</string>
         <string name="macro_editor_table_input_methods">Table Input Methods</string>
     <string name="macro_editor_pinyin_custom_phrase">Pinyin Custom Phrase</string>

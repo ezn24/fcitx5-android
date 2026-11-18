@@ -363,25 +363,34 @@ object VoiceInputProviderManager {
             releaseProviderConnection(service, callStopSession = true)
         }
 
+        val notifyReady = onReady
         val callback = object : IVoiceInputCallback.Stub() {
+            private fun dispatch(block: () -> Unit) {
+                val expected = this
+                service.lifecycleScope.launch(Dispatchers.Main.immediate) {
+                    if (activeCallback === expected && !voiceSessionTerminalized) block()
+                }
+            }
+
             override fun onReady() {
                 logI("provider ready")
-                sessionReady = true
-                service.lifecycleScope.launch {
+                dispatch {
+                    if (sessionReady || finishing) return@dispatch
+                    sessionReady = true
                     onProviderReady(service, onLevel, onError)
-                    onReady()
+                    notifyReady()
                 }
             }
 
             override fun onVolumeLevel(rms: Int) {
-                service.lifecycleScope.launch { onLevel(rms) }
+                dispatch { onLevel(rms) }
             }
 
             override fun onPartialResult(text: String?) {
                 val t = text.orEmpty()
                 if (t.isNotBlank()) {
                     logI("partial result len=${t.length}: $t")
-                    service.lifecycleScope.launch {
+                    dispatch {
                         service.setVoiceComposingText(t)
                         onPartialResult(t)
                     }
@@ -393,10 +402,10 @@ object VoiceInputProviderManager {
                 if (t.isNotBlank()) {
                     logI("segment final len=${t.length}: $t")
                     tlogI("Voice segment final: $t")
-                    service.lifecycleScope.launch { service.commitText(t) }
+                    dispatch { service.commitText(t) }
                 } else {
                     logI("segment final blank")
-                    service.lifecycleScope.launch { service.clearVoiceComposingText() }
+                    dispatch { service.clearVoiceComposingText() }
                 }
             }
 
@@ -406,22 +415,22 @@ object VoiceInputProviderManager {
                 // Any partial that wasn't followed by a final (e.g. provider
                 // discarded it via speaker filter / VAD silence / cancel) is
                 // now an orphan — clear it instead of leaving stale composing.
-                service.lifecycleScope.launch {
+                dispatch {
                     service.clearVoiceComposingText()
                     onFinished()
+                    stopSession(service, keepConnectionWarm = true)
                 }
-                stopSession(service, keepConnectionWarm = true)
             }
 
             override fun onError(code: Int, message: String?) {
                 logW("provider error $code: $message")
                 Timber.w("Voice provider error $code: $message")
-                service.lifecycleScope.launch {
+                dispatch {
                     service.clearVoiceComposingText()
                     onFinished()
                     onError(message ?: appContext.getString(org.fcitx.fcitx5.android.R.string.voice_error_failed))
+                    stopSession(service, keepConnectionWarm = false)
                 }
-                stopSession(service, keepConnectionWarm = false)
             }
         }
 
@@ -1035,14 +1044,15 @@ object VoiceInputProviderManager {
         activeAudioFeedQueue = null
         activeAudioFeedJob?.cancel()
         activeAudioFeedJob = null
+        activeCallback = null
         try {
             activeProvider?.stopSession()
         } catch (e: Throwable) {
             Timber.w(e, "stopSession")
         }
-        activeCallback = null
         finishing = false
         sessionActive = false
+        sessionReady = false
         floatingFallbackActive = false
         floatingFallbackComponent = null
         if (keepConnectionWarm && activeProvider != null && activeConnection != null) {
@@ -1055,6 +1065,14 @@ object VoiceInputProviderManager {
                 .onFailure { Timber.w(it, "keepalive unbind on stop") }
         }
         keepAliveConnection = null
+        if (context is FcitxInputMethodService) {
+            context.lifecycleScope.launch(Dispatchers.Main.immediate) {
+                if (!isActive()) {
+                    context.clearVoiceComposingText()
+                    voiceFinishedCallback?.invoke()
+                }
+            }
+        }
     }
 
     private fun scheduleWarmConnectionRelease(context: Context) {

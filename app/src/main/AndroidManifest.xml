@@ -350,6 +350,14 @@
                 android:resource="@xml/share_file_paths" />
         </provider>
 
+        <receiver
+            android:name=".input.FloatingKeyboardReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="${applicationId}.action.SET_FLOATING_KEYBOARD" />
+            </intent-filter>
+        </receiver>
+
         <!-- remove unneeded components from com.canhub.cropper -->
         <!--suppress DeprecatedClassUsageInspection -->
         <activity

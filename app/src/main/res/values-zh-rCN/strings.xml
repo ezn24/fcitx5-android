@@ -325,6 +325,7 @@
     <string name="custom_label_hint">图标下方显示的名称</string>
     <string name="enable_long_press_menu">启用长按显示浮动菜单</string>
     <string name="floating_keyboard">浮动键盘</string>
+    <string name="allow_floating_keyboard_intent">允许其他应用控制浮动键盘</string>
     <string name="adjusting_mode_confirm">确认</string>
         <string name="macro_editor_table_input_methods">码表输入法</string>
     <string name="macro_editor_pinyin_custom_phrase">拼音自定义短语</string>

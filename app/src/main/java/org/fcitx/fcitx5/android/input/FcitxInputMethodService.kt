@@ -1990,6 +1990,13 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
         return inputView?.handleInlineSuggestions(response) == true
     }
 
+    override fun onWindowHidden() {
+        if (VoiceInputProviderManager.isActive()) {
+            VoiceInputProviderManager.stop(this)
+        }
+        super.onWindowHidden()
+    }
+
     override fun onFinishInputView(finishingInput: Boolean) {
         discardEmojiSearchInput()
         Timber.d("onFinishInputView: finishingInput=$finishingInput")
@@ -2014,6 +2021,9 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
 
     override fun onFinishInput() {
         discardEmojiSearchInput()
+        if (VoiceInputProviderManager.isActive()) {
+            VoiceInputProviderManager.stop(this)
+        }
         Timber.d("onFinishInput")
         MainService.stopSyncService(this)
         val inputSessionGeneration = this.inputSessionGeneration
@@ -2038,6 +2048,7 @@ class FcitxInputMethodService : LifecycleInputMethodService() {
     }
 
     override fun onDestroy() {
+        VoiceInputProviderManager.stop(this)
         MainService.stopSyncService(this)
         recreateInputViewPrefs.forEach {
             it.unregisterOnChangeListener(recreateInputViewListener)

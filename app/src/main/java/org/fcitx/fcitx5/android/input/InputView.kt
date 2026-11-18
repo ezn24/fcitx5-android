@@ -2790,6 +2790,20 @@ class InputView(
     }
 
     @Keep
+    private val onFloatingKeyboardIntentChangeListener = ManagedPreferenceProvider.OnChangeListener { key ->
+        if (key == internalPrefs.floatingModeEnabled.key) {
+            post {
+                // Re-read so consecutive commands apply only the latest requested mode.
+                val enabled = internalPrefs.floatingModeEnabled.getValue()
+                if (isAttachedToWindow && isFloating != enabled) {
+                    exitAdjustingMode()
+                    toggleFloatingMode()
+                }
+            }
+        }
+    }
+
+    @Keep
     private val onCandidatePreferenceChangeListener = ManagedPreferenceProvider.OnChangeListener { key ->
         if (key == physicalKeyboardHorizontalCandidateBar.key) {
             service.inputDeviceManager.onPhysicalKeyboardHorizontalCandidateBarChanged()
@@ -3000,6 +3014,7 @@ class InputView(
         keyboardPrefs.registerOnChangeListener(onKeyboardSizeChangeListener)
         advancedPrefs.registerOnChangeListener(onKeyboardSizeChangeListener)
         candidatesPrefs.registerOnChangeListener(onCandidatePreferenceChangeListener)
+        internalPrefs.registerOnChangeListener(onFloatingKeyboardIntentChangeListener)
         restoreFloatingAndOneHandState()
         updateFloatingState()
         updateFloatingHandlesVisibility()
@@ -3470,6 +3485,7 @@ class InputView(
         advancedPrefs.unregisterOnChangeListener(onKeyboardSizeChangeListener)
         keyboardPrefs.unregisterOnChangeListener(onKeyboardSizeChangeListener)
         candidatesPrefs.unregisterOnChangeListener(onCandidatePreferenceChangeListener)
+        internalPrefs.unregisterOnChangeListener(onFloatingKeyboardIntentChangeListener)
         ConfigProviders.removeButtonsLayoutListener(onButtonsLayoutChangeListener)
         ConfigProviders.removeIconChangeListener(onIconChangeListener)
         blurUpdateJob?.cancel()

@@ -110,6 +110,11 @@ class AppPrefs(private val sharedPreferences: SharedPreferences) {
     }
 
     inner class Keyboard : ManagedPreferenceCategory(R.string.virtual_keyboard, sharedPreferences) {
+        val allowFloatingKeyboardIntent = switch(
+            R.string.allow_floating_keyboard_intent,
+            "allow_floating_keyboard_intent",
+            false
+        )
         val hapticOnKeyPress =
             enumList(
                 R.string.button_haptic_feedback,

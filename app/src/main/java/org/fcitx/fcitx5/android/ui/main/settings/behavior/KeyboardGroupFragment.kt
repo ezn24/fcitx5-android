@@ -309,6 +309,7 @@ class KeyboardGroupFragment : ManagedPreferenceFragment(AppPrefs.getInstance().k
                 "split_keyboard_enabled", "split_keyboard_use_landscape_layout",
             ),
             GROUP_BEHAVIOR to setOf(
+                "allow_floating_keyboard_intent",
                 "popup_on_key_press", "keyboard_long_press_delay",
                 "swipe_symbol_behavior", "keep_keyboard_letters_uppercase",
                 "reset_keyboard_on_focus_change",
